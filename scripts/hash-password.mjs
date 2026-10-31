@@ -40,5 +40,7 @@ if (!password) {
   process.exit(1);
 }
 const encoded = await hash(password, { algorithm: 2 }); // 2 = Argon2id
-// Single quotes stop Compose from expanding the $ signs in the hash.
-console.log(`LIVE_ADMIN_PASSWORD_HASH='${encoded}'`);
+// Compose expands $ signs. In .env single quotes prevent that, and in an
+// environment: list each $ is doubled instead. Quotes there would join the value.
+console.log(`# For .env:\nLIVE_ADMIN_PASSWORD_HASH='${encoded}'`);
+console.log(`# For an environment: list in a compose file:\n- LIVE_ADMIN_PASSWORD_HASH=${encoded.replaceAll("$", "$$$$")}`);

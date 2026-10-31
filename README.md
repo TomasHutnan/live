@@ -43,34 +43,36 @@ live.hutnan.dev {
 }
 ```
 
-### If Caddy runs in a container
+### With caddy-docker-proxy
 
-`127.0.0.1` inside the Caddy container is not the host, so use a shared Docker network instead
-of the published port. In `compose.yaml`, remove `ports:` and join the network Caddy is on:
+`compose.vps.yaml` is the production setup and the only file the server needs. It uses the published
+image, the shared `web` network, and labels for caddy-docker-proxy and homepage.
 
-```yaml
-services:
-  live:
-    # ...
-    networks: [caddy]
-
-networks:
-  caddy:
-    external: true   # the network your Caddy container already uses
+```sh
+mkdir ~/live && cd ~/live
+curl -fsSLo compose.yaml https://raw.githubusercontent.com/TomasHutnan/live/main/compose.vps.yaml
+sudo install -d -o 1000 -g 1000 /home/deploy/data/live
+docker run --rm -it ghcr.io/tomashutnan/live npm run -s hash-password
+nano compose.yaml   # replace the LIVE_ADMIN_PASSWORD_HASH line with the printed compose line
+docker compose up -d
 ```
 
-Then point Caddy at the service name:
+To update, run `docker compose pull && docker compose up -d`. Every image is also tagged by commit
+(`sha-1a2b3c4`), so to roll back, put that tag in `image:`. Tagging a release `v1.2.3` adds the tag `1.2.3`.
 
-```caddyfile
-live.hutnan.dev {
-    encode zstd gzip
-    reverse_proxy live:8090
-}
-```
+The hash line needs its doubled `$$` signs and no quotes: quotes in an `environment:` list become part
+of the value, and every login then fails. The repository is public, so keep real hashes out of it.
 
-Without a published port, only containers on that network can reach the app. Everything on
-the network counts as a trusted proxy under the default `LIVE_TRUST_PROXY`, so set it to
-Caddy's address if other containers share the network.
+The data directory must belong to uid 1000, the user inside the container. Backups read from
+`/home/deploy/data/live` rather than the volume path below.
+
+Every container on `web` counts as a trusted proxy under the default `LIVE_TRUST_PROXY`. That only
+affects which client address the rate limit sees.
+
+### Images
+
+`.github/workflows/image.yml` runs all tests on every push, then publishes
+`ghcr.io/tomashutnan/live` for amd64 and arm64 from `main` and `v*` tags. A failing test publishes nothing.
 
 ## Upload
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { etagMatches } from "../../src/server/assets.ts";
 import { randomUUID } from "node:crypto";
 import { openDb } from "../../src/server/db.ts";
 import { type Peer, Rooms, type Socket } from "../../src/server/rooms.ts";
@@ -235,16 +236,17 @@ describe("rooms", () => {
     it("persists the position and tells everyone else", () => {
       const p = presenter();
       const v = connect();
-      send(p.peer, { t: "position", position: { h: 3, v: 1, f: 2 } });
+      send(p.peer, { t: "position", m: "p", position: { h: 3, v: 1, f: 2 } });
       expect(store.session(SLUG)!.position).toEqual({ h: 3, v: 1, f: 2 });
       expect(v.socket.of("position")[0]).toMatchObject({ position: { h: 3, v: 1, f: 2 } });
       expect(p.socket.of("position")).toHaveLength(0);
+      expect(p.socket.of("ack").map((a) => a.m)).toEqual(["p"]);
     });
 
     it("gives a late joiner position, items and strokes in progress", () => {
       const p = presenter();
       const item = text();
-      send(p.peer, { t: "position", position: { h: 1, v: 0, f: 0 } });
+      send(p.peer, { t: "position", m: "p", position: { h: 1, v: 0, f: 0 } });
       send(p.peer, { t: "item.add", m: "a", item });
       const id = randomUUID();
       send(p.peer, { t: "stroke.start", stroke: { id, h: 1, v: 0, step: 0, tool: "pen", color: "#000000", width: 4 } });
@@ -263,6 +265,19 @@ describe("rooms", () => {
       rooms.leave(p.peer);
       expect(v.socket.of("item.remove")[0]?.id).toBe(id);
       expect(connect().socket.of("snapshot")[0]?.live).toEqual([]);
+    });
+
+    it("keeps a stroke finished on a new socket when the old socket closes late", () => {
+      const old = presenter();
+      const v = connect();
+      const item = stroke();
+      const { id, h, step } = item;
+      send(old.peer, { t: "stroke.start", stroke: { id, h, v: 0, step, tool: "pen", color: "#000000", width: 4 } });
+      const fresh = presenter();
+      send(fresh.peer, { t: "stroke.end", m: "a", item });
+      rooms.leave(old.peer);
+      expect(v.socket.of("item.remove")).toEqual([]);
+      expect(store.liveItems(SLUG)).toHaveLength(1);
     });
 
     it("counts viewers and presenters apart", () => {
@@ -296,5 +311,15 @@ describe("rooms", () => {
       rooms.heartbeat();
       expect(socket.terminated).toBe(true);
     });
+  });
+});
+
+describe("etagMatches", () => {
+  it("accepts the validator with Caddy's suffix or a weak marker", () => {
+    expect(etagMatches('"abc"', '"abc"')).toBe(true);
+    expect(etagMatches('"abc-zstd"', '"abc"')).toBe(true);
+    expect(etagMatches('W/"abc-gzip"', '"abc"')).toBe(true);
+    expect(etagMatches('"abd"', '"abc"')).toBe(false);
+    expect(etagMatches(undefined, '"abc"')).toBe(false);
   });
 });

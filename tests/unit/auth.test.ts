@@ -46,6 +46,15 @@ describe("BasicAuth", () => {
     now += 5 * 60_000 + 1;
     expect(auth.blockedFor("bad")).toBe(0);
   });
+
+  it("does not lock out credentials that already passed on the same IP", async () => {
+    const auth = new BasicAuth("tomas", passwordHash);
+    const good = basic("tomas", "heslo:s-dvojbodkou-š");
+    await auth.check(good, "shared");
+    for (let i = 0; i < 10; i++) await auth.check(basic("student", "x"), "shared");
+    expect(auth.blockedFor("shared", basic("student", "x"))).toBeGreaterThan(0);
+    expect(auth.blockedFor("shared", good)).toBe(0);
+  });
 });
 
 describe("Origin checks", () => {

@@ -19,6 +19,8 @@ export interface RevealApi {
   configure(options: Record<string, unknown>): void;
   isOverview(): boolean;
   isPrintView?(): boolean;
+  isScrollView(): boolean;
+  toggleScrollView(on: boolean): void;
 }
 
 declare global {
@@ -31,6 +33,16 @@ declare global {
 export function whenReady(reveal: RevealApi, run: () => void): void {
   if (reveal.isReady()) run();
   else reveal.on("ready", run);
+}
+
+/**
+ * Keeps the deck in slide view at any width. Below 435 px, which means every
+ * phone in portrait and the preview frame, reveal otherwise switches to its
+ * scroll view, where slides, steps and the overlay no longer line up.
+ */
+export function keepSlideView(reveal: RevealApi): void {
+  reveal.configure({ scrollActivationWidth: null });
+  if (reveal.isScrollView()) reveal.toggleScrollView(false);
 }
 
 export function readPosition(reveal: RevealApi): Position {

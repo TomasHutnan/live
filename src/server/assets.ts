@@ -9,6 +9,11 @@ export interface Asset {
   type: string;
 }
 
+/** Compares validators, ignoring a weak marker and the -zstd/-gzip suffix Caddy's encode adds. */
+export function etagMatches(header: string | undefined, etag: string): boolean {
+  return header?.replace(/^W\//, "").replace(/-(?:zstd|gzip|br)"$/, '"') === etag;
+}
+
 /** Bundled browser code, read once at startup. dist/server.js sits next to dist/public. */
 export function loadAssets(dir = join(dirname(fileURLToPath(import.meta.url)), "public")): Map<string, Asset> {
   const assets = new Map<string, Asset>();

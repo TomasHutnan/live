@@ -1,5 +1,5 @@
-import { expect, fixturePath, nextSlug, presenterContext, test, USER } from "./harness.ts";
 import { readFileSync } from "node:fs";
+import { expect, fixturePath, nextSlug, presenterContext, test } from "./harness.ts";
 
 test("uploads, rejects non-decks, dedupes and warns", async ({ server }) => {
   const html = readFileSync(fixturePath, "utf8");
@@ -127,5 +127,4 @@ test("dashboard: upload, suggest a slug, create, remove with typed confirmation,
   await deck.getByRole("button", { name: "Delete" }).click();
   await expect(deck).toHaveCount(0);
   await context.close();
-  expect(USER).toBeTruthy();
 });

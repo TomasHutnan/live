@@ -1,5 +1,6 @@
 import type { Position, ServerMessage } from "../shared/protocol.ts";
 import { Connection } from "./connection.ts";
+import { applyInkMessage, Overlay } from "./overlay.ts";
 import { onNavigation, readPosition, type RevealApi, samePosition } from "./reveal.ts";
 import { addStyles } from "./style.ts";
 
@@ -7,7 +8,7 @@ import { addStyles } from "./style.ts";
 const STRINGS = {
   sk: {
     live: "Naživo",
-    browsing: "Prezeráš sám",
+    browsing: "Voľné prezeranie",
     browse: "Prechádzať",
     back: "Späť na živo",
     offline: "Spojenie je prerušené. Pripájam sa znova…",
@@ -27,7 +28,9 @@ export function startViewer(reveal: RevealApi, slug: string): void {
   addStyles();
   const text = document.documentElement.lang.startsWith("sk") ? STRINGS.sk : STRINGS.en;
   const root = document.documentElement;
+  root.classList.add("live-viewer");
 
+  const overlay = new Overlay(reveal);
   let live: Position | undefined;
   let following = true;
 
@@ -36,6 +39,7 @@ export function startViewer(reveal: RevealApi, slug: string): void {
   const dot = document.createElement("span");
   dot.className = "live-dot";
   const label = document.createElement("span");
+  label.className = "live-pill-label";
   const toggle = document.createElement("button");
   toggle.type = "button";
   pill.append(dot, label, toggle);
@@ -78,6 +82,8 @@ export function startViewer(reveal: RevealApi, slug: string): void {
     switch (message.t) {
       case "snapshot":
         live = message.position;
+        overlay.setItems(message.items);
+        overlay.setLive(message.live);
         follow();
         break;
       case "position":
@@ -87,6 +93,8 @@ export function startViewer(reveal: RevealApi, slug: string): void {
       case "session.removed":
         over.hidden = false;
         break;
+      default:
+        applyInkMessage(overlay, message);
     }
   }
 

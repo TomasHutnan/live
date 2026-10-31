@@ -95,7 +95,7 @@ export class Rooms {
     ping: Handler<unknown>;
   } = {
     ping: (_room, peer) => peer.send({ t: "pong" }),
-    position: (room, peer, m) => this.onPosition(room, peer, m.position),
+    position: (room, peer, m) => this.onPosition(room, peer, m),
     "stroke.start": (room, peer, m) => this.onStrokeStart(room, peer, m),
     "stroke.points": (room, peer, m) => this.onStrokePoints(room, peer, m),
     "stroke.end": (room, peer, m) => this.onStrokeEnd(room, peer, m),
@@ -160,9 +160,10 @@ export class Rooms {
     if (!room.peers.delete(peer)) return;
     // The presenter's outbox still holds these. Drop the half-drawn copies
     // until the finished items arrive.
+    // A reconnected presenter may already have finished one on a new socket,
+    // which is why only strokes still in progress are dropped.
     for (const id of peer.strokes) {
-      room.live.delete(id);
-      room.broadcast({ t: "item.remove", id });
+      if (room.live.delete(id)) room.broadcast({ t: "item.remove", id });
     }
     if (room.peers.size === 0) this.rooms.delete(room.slug);
     else room.announce();
@@ -220,11 +221,12 @@ export class Rooms {
 
   // Presenter handlers
 
-  private onPosition(room: Room, peer: Peer, position: Position): void {
+  private onPosition(room: Room, peer: Peer, { m, position }: { m: string; position: Position }): void {
     const { h, v, f } = position;
     room.position = { h, v, f };
     this.store.setPosition(room.slug, room.position);
     room.broadcast({ t: "position", position: room.position }, peer);
+    peer.send({ t: "ack", m });
   }
 
   private onStrokeStart(room: Room, peer: Peer, message: Extract<PresenterMessage, { t: "stroke.start" }>): void {

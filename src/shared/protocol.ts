@@ -98,7 +98,7 @@ export type Mutation =
   | { t: "slide.clear"; m: string; slide: Slide; ids: string[] };
 
 export type PresenterMessage =
-  | { t: "position"; position: Position }
+  | { t: "position"; m: string; position: Position }
   | { t: "stroke.start"; stroke: Omit<LiveStroke, "points"> }
   | { t: "stroke.points"; id: string; points: Point[] }
   | Mutation;
@@ -184,7 +184,7 @@ const isSlide = (x: unknown) => isObject(x) && isIndex(x.h) && isIndex(x.v);
 const isMsgId = (x: unknown) => typeof x === "string" && x.length > 0 && x.length <= 64;
 
 export const presenterValidators: Record<PresenterMessage["t"], (m: Record<string, unknown>) => boolean> = {
-  position: (m) => isSlide(m.position) && isStep((m.position as Position).f),
+  position: (m) => isMsgId(m.m) && isSlide(m.position) && isStep((m.position as Position).f),
   "stroke.start": (m) => isObject(m.stroke) && hasPlace(m.stroke) && isStyle(m.stroke),
   "stroke.points": (m) => isId(m.id) && isPoints(m.points),
   "stroke.end": (m) => isMsgId(m.m) && isItem(m.item) && m.item.kind === "stroke",

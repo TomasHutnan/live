@@ -1,13 +1,4 @@
-import type { Page } from "@playwright/test";
-import { expect, presenterContext, test } from "./harness.ts";
-
-const position = (page: Page) =>
-  page.evaluate(() => {
-    const { h, v, f } = window.Reveal.getIndices();
-    return { h, v, f: f ?? -1 };
-  });
-
-const ready = (page: Page) => expect(page.locator("html")).toHaveAttribute("data-live-state", "connected");
+import { connected as ready, expect, position, presenterContext, test } from "./harness.ts";
 
 test("viewer follows slides and steps, late joiner matches, viewer keys do nothing", async ({ browser, server, deckSlug }) => {
   const presenterCtx = await presenterContext(browser);

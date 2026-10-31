@@ -1,10 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hash } from "@node-rs/argon2";
-import { type Browser, type BrowserContext, type Page, test as base } from "@playwright/test";
+import { type Browser, type BrowserContext, expect, type Page, test as base } from "@playwright/test";
 
 export const USER = "tomas";
 export const PASSWORD = "skúška-heslo";
@@ -29,6 +29,8 @@ export class LiveServer {
   readonly dataDir = mkdtempSync(join(tmpdir(), "live-e2e-"));
   port = 0;
 
+  constructor(private readonly env: Record<string, string> = {}) {}
+
   get url(): string {
     return `http://127.0.0.1:${this.port}`;
   }
@@ -46,6 +48,7 @@ export class LiveServer {
         LIVE_ADMIN_PASSWORD_HASH: await passwordHash,
         LIVE_HEARTBEAT_MS: "2000",
         LOG_LEVEL: "error",
+        ...this.env,
       },
     });
     for (let i = 0; i < 100; i++) {
@@ -103,6 +106,42 @@ export class LiveServer {
   }
 }
 
+/** A TCP proxy a test can cut, to give one browser a real network drop. */
+export class Proxy {
+  private server?: Server;
+  private readonly sockets = new Set<Socket>();
+  port = 0;
+
+  constructor(private readonly target: number) {}
+
+  get url(): string {
+    return `http://127.0.0.1:${this.port}`;
+  }
+
+  async up(): Promise<void> {
+    this.port ||= await freePort();
+    this.server = createServer((client) => {
+      const upstream = connect(this.target, "127.0.0.1");
+      client.pipe(upstream).pipe(client);
+      for (const socket of [client, upstream]) {
+        this.sockets.add(socket);
+        socket.on("error", () => {});
+        socket.on("close", () => {
+          this.sockets.delete(socket);
+          client.destroy();
+          upstream.destroy();
+        });
+      }
+    });
+    await new Promise<void>((resolve) => this.server!.listen(this.port, "127.0.0.1", resolve));
+  }
+
+  async down(): Promise<void> {
+    for (const socket of this.sockets) socket.destroy();
+    await new Promise((resolve) => this.server?.close(resolve));
+  }
+}
+
 let counter = 0;
 export const nextSlug = () => `s${process.pid}-${counter++}`;
 
@@ -135,6 +174,65 @@ export const test = base.extend<{ deckSlug: string }, { server: LiveServer; deck
   },
 });
 
-export { expect } from "@playwright/test";
+export { expect };
+
+export const connected = (page: Page) => expect(page.locator("html")).toHaveAttribute("data-live-state", "connected");
+
+export const position = (page: Page) =>
+  page.evaluate(() => {
+    const { h, v, f } = window.Reveal.getIndices();
+    return { h, v, f: f ?? -1 };
+  });
+
+/** Jumps to the first slide with at least `steps` fragments, at step `f`, and reports where that is. */
+export async function goToSteppedSlide(page: Page, f: number, steps = 3): Promise<{ h: number; v: number }> {
+  return page.evaluate(
+    ([f, steps]) => {
+      const slide = (window.Reveal as unknown as { getSlides(): HTMLElement[] })
+        .getSlides()
+        .find((s) => new Set([...s.querySelectorAll(".fragment")].map((x) => x.getAttribute("data-fragment-index"))).size >= steps!);
+      if (!slide) throw new Error("no stepped slide");
+      const { h, v } = (window.Reveal as unknown as { getIndices(s: HTMLElement): { h: number; v: number } }).getIndices(slide);
+      window.Reveal.slide(h, v, f);
+      return { h, v };
+    },
+    [f, steps],
+  );
+}
+
+export const tool = (page: Page, name: string) => page.getByRole("button", { name, exact: true }).click();
+
+/** Viewport position of slide coordinates. */
+export const slidePoint = (page: Page, x: number, y: number) =>
+  page.evaluate(
+    ([x, y]) => {
+      const rect = document.querySelector(".reveal .slides")!.getBoundingClientRect();
+      const { width, height } = window.Reveal.getConfig();
+      return { x: rect.left + (x! / (width as number)) * rect.width, y: rect.top + (y! / (height as number)) * rect.height };
+    },
+    [x, y],
+  );
+
+/** Draws a straight stroke with the mouse, between slide coordinates. */
+export async function draw(page: Page, from: [number, number], to: [number, number]): Promise<void> {
+  const a = await slidePoint(page, ...from);
+  const b = await slidePoint(page, ...to);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 4 });
+  await page.mouse.move(b.x, b.y, { steps: 4 });
+  await page.mouse.up();
+}
+
+/** Ids of ink elements on screen. */
+export const inkIds = (page: Page) =>
+  page.locator("#live-overlay g[data-item-id]").evaluateAll((nodes) => nodes.map((n) => (n as SVGGElement).dataset.itemId!).sort());
+
+/** Bounding box of one ink element, in slide coordinates. */
+export const inkBox = (page: Page, id: string) =>
+  page.evaluate((id) => {
+    const box = (document.querySelector(`#live-overlay g[data-item-id="${id}"]`) as SVGGElement).getBBox();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }, id);
 
 export type { Page };

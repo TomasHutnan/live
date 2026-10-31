@@ -1,7 +1,7 @@
 // Injected into every served deck. The URL decides what this page is.
 import { startControls } from "./controls.ts";
 import { startPreview } from "./preview.ts";
-import { whenReady } from "./reveal.ts";
+import { keepSlideView, whenReady } from "./reveal.ts";
 import { startViewer } from "./viewer.ts";
 
 const reveal = window.Reveal;
@@ -11,6 +11,7 @@ whenReady(reveal, () => {
   if (reveal.isPrintView?.()) return;
   // The server owns the position, so the URL hash must not compete with it.
   reveal.configure({ hash: false, history: false, respondToHashChanges: false });
+  keepSlideView(reveal);
   if (first === "controls" && second && third === "next") startPreview(reveal);
   else if (first === "controls" && second) startControls(reveal, second);
   else if (first) startViewer(reveal, first);

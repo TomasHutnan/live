@@ -20,6 +20,8 @@ function same(a: string, b: string): boolean {
 export class BasicAuth {
   private readonly key = randomBytes(32);
   private readonly verified = new Map<string, number>();
+  /** Headers that passed in this process. The password can't change without a restart. */
+  private readonly known = new Set<string>();
   private readonly failures = new Map<string, { count: number; since: number }>();
 
   constructor(
@@ -32,8 +34,13 @@ export class BasicAuth {
     return createHmac("sha256", this.key).update(header).digest("base64");
   }
 
-  /** Milliseconds left on the lockout for this IP, or 0. */
-  blockedFor(ip: string): number {
+  /**
+   * Milliseconds left on the lockout for this IP, or 0. A header that has
+   * already passed is exempt: a whole university can share one address, and
+   * someone guessing there must not lock the presenter out mid-class.
+   */
+  blockedFor(ip: string, header?: string): number {
+    if (header && this.known.has(this.fingerprint(header))) return 0;
     const entry = this.failures.get(ip);
     if (!entry) return 0;
     const left = entry.since + FAILURE_WINDOW_MS - this.now();
@@ -62,6 +69,7 @@ export class BasicAuth {
     const ok = await this.verifyHeader(header);
     if (ok) {
       this.verified.set(fingerprint, this.now() + CACHE_MS);
+      this.known.add(fingerprint);
       this.failures.delete(ip);
     } else {
       this.recordFailure(ip);
@@ -83,7 +91,7 @@ export class BasicAuth {
 
   /** Fastify preHandler for every password-protected route. */
   guard = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    const blocked = this.blockedFor(request.ip);
+    const blocked = this.blockedFor(request.ip, request.headers.authorization);
     if (blocked > 0) {
       await reply
         .code(429)

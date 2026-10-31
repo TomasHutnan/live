@@ -1,0 +1,40 @@
+{
+  "name": "live",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted live presentation service for Quarto reveal.js decks",
+  "license": "MIT",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node --env-file-if-exists=.env dist/server.js",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
+    "hash-password": "node scripts/hash-password.mjs"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.6",
+    "@fastify/websocket": "^11.3.6",
+    "@node-rs/argon2": "^2.2.2",
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.12.7",
+    "perfect-freehand": "^1.2.3",
+    "qrcode": "^1.5.4",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

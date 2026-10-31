@@ -8,7 +8,6 @@ import {
   goToSteppedSlide,
   inkBox,
   inkIds,
-  LiveServer,
   nextSlug,
   type Page,
   position,
@@ -275,9 +274,8 @@ test("two presenter devices stay in step through the server", async ({ browser, 
   await follow(two, one);
 });
 
-test("sessions and ink survive a server restart", async ({ browser }) => {
-  const server = new LiveServer();
-  await server.start();
+test("sessions and ink survive a server restart", async ({ browser, ownServer }) => {
+  const server = await ownServer();
   const deck = await server.upload();
   await server.createSession("cv05-a", deck.id);
 
@@ -302,7 +300,6 @@ test("sessions and ink survive a server restart", async ({ browser }) => {
   await expect.poll(() => position(fresh)).toEqual(at);
   await expect.poll(() => inkIds(fresh)).toEqual([id]);
   await expect.poll(() => inkIds(viewer)).toEqual([id]);
-  await server.dispose();
 });
 
 test("a viewer sending presenter messages is disconnected, and no state changes", async ({ server, deckSlug }) => {

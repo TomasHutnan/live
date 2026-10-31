@@ -150,7 +150,10 @@ export async function presenterContext(browser: Browser, viewport = { width: 128
 }
 
 /** One server per worker: tests isolate themselves by slug. */
-export const test = base.extend<{ deckSlug: string }, { server: LiveServer; deckId: string }>({
+export const test = base.extend<
+  { deckSlug: string; ownServer: (env?: Record<string, string>) => Promise<LiveServer> },
+  { server: LiveServer; deckId: string }
+>({
   server: [
     async ({}, use) => {
       const server = new LiveServer();
@@ -167,6 +170,17 @@ export const test = base.extend<{ deckSlug: string }, { server: LiveServer; deck
     },
     { scope: "worker" },
   ],
+  // For tests that stop the server or change its settings. Always cleaned up.
+  ownServer: async ({}, use) => {
+    const started: LiveServer[] = [];
+    await use(async (env) => {
+      const server = new LiveServer(env);
+      started.push(server);
+      await server.start();
+      return server;
+    });
+    await Promise.all(started.map((server) => server.dispose()));
+  },
   deckSlug: async ({ server, deckId }, use) => {
     const slug = nextSlug();
     await server.createSession(slug, deckId);

@@ -62,11 +62,8 @@ test("browsing freely, then back to live", async ({ browser, server, deckSlug })
   await presenterCtx.close();
 });
 
-test("a viewer shows a disconnected state and recovers with the current position", async ({ browser }) => {
-  // Own server: this test stops it.
-  const { LiveServer } = await import("./harness.ts");
-  const server = new LiveServer();
-  await server.start();
+test("a viewer shows a disconnected state and recovers with the current position", async ({ browser, ownServer }) => {
+  const server = await ownServer();
   const deck = await server.upload();
   await server.createSession("cv05-a", deck.id);
 
@@ -81,7 +78,6 @@ test("a viewer shows a disconnected state and recovers with the current position
   await ready(viewer);
   await expect(viewer.locator(".live-banner")).toBeHidden();
   await viewer.close();
-  await server.dispose();
 });
 
 test("removing a session tells viewers, and the slug then returns 404", async ({ browser, server, deckSlug }) => {

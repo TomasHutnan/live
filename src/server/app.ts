@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import multipart from "@fastify/multipart";
+import websocket from "@fastify/websocket";
 import type Database from "better-sqlite3";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import QRCode from "qrcode";
@@ -8,12 +9,13 @@ import { type Asset, loadAssets } from "./assets.ts";
 import { BasicAuth } from "./auth.ts";
 import { type Config, decksDir } from "./config.ts";
 import { DeckFiles, MAX_UPLOAD_BYTES, UploadError } from "./decks.ts";
-import { allowsUnsafeRequest } from "./origin.ts";
+import { allowsUnsafeRequest, originMatches } from "./origin.ts";
 import { dashboardPage, notFoundPage } from "./pages.ts";
 import { Rooms } from "./rooms.ts";
 import { type Deck, type Session, Store } from "./store.ts";
 
 const HTML = "text/html; charset=utf-8";
+const MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
 
 export async function buildApp(config: Config, db: Database.Database): Promise<FastifyInstance> {
   const app = Fastify({
@@ -24,10 +26,14 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
   const store = new Store(db);
   const files = new DeckFiles(decksDir(config), store);
   const assets = loadAssets();
-  const rooms = new Rooms();
+  const rooms = new Rooms(store);
   const guarded = { preHandler: auth.guard };
 
   await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
+  await app.register(websocket, { options: { maxPayload: MAX_MESSAGE_BYTES } });
+
+  const heartbeat = setInterval(() => rooms.heartbeat(), config.heartbeatMs);
+  app.addHook("onClose", async () => clearInterval(heartbeat));
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
@@ -193,6 +199,40 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
 
   app.get("/controls/:slug/next", guarded, async (request, reply) =>
     withSession(request, reply, (_s, deck) => sendDeck(request, reply, deck, "private, no-cache")),
+  );
+
+  app.post("/controls/:slug/token", guarded, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    if (!store.session(slug)) return reply.code(404).send({ error: "No such session." });
+    return reply.header("Cache-Control", "no-store").send({ token: rooms.issueToken(slug) });
+  });
+
+  // Realtime. The Origin check runs before the upgrade. Roles come from tokens.
+
+  app.get(
+    "/ws/:slug",
+    {
+      websocket: true,
+      preValidation: async (request, reply) => {
+        const { origin } = request.headers;
+        if (!origin || !originMatches(origin, request.host, config)) {
+          await reply.code(403).send("Origin refused.\n");
+        }
+      },
+    },
+    (socket, request) => {
+      const peer = rooms.join((request.params as { slug: string }).slug, socket);
+      if (!peer) return;
+      socket.on("message", (data) => {
+        peer.alive = true;
+        rooms.receive(peer, data.toString());
+      });
+      socket.on("pong", () => {
+        peer.alive = true;
+      });
+      socket.on("close", () => rooms.leave(peer));
+      socket.on("error", () => socket.terminate());
+    },
   );
 
   // Viewer. Fixed routes above win over this one.

@@ -418,3 +418,58 @@ test("a phone in portrait stays in slide view, follows, and shows ink in the rig
   expect(Math.abs(placed.centre - 0.5)).toBeLessThan(0.01);
   expect(placed.fits).toBe(true);
 });
+
+test("pen pressure is stored, and touch is ignored once a pen has been seen, except for placing text", async ({ browser, server, deckSlug }) => {
+  const { controls, viewer } = await pair(browser, server.url, deckSlug);
+  await tool(controls, "Pen");
+
+  const gesture = (pointerType: string, y: number) =>
+    controls.evaluate(
+      ([pointerType, y]) => {
+        const svg = document.querySelector("#live-overlay")!;
+        const box = svg.getBoundingClientRect();
+        const fire = (type: string, x: number, pressure: number) =>
+          svg.dispatchEvent(
+            new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 7,
+              pointerType: pointerType as string,
+              pressure,
+              clientX: box.left + x,
+              clientY: box.top + (y as number),
+            }),
+          );
+        const capture = svg.setPointerCapture;
+        svg.setPointerCapture = () => {}; // Synthetic pointers have no capture target.
+        fire("pointerdown", 100, 0.2);
+        fire("pointermove", 200, 0.6);
+        fire("pointermove", 300, 0.9);
+        fire("pointerup", 300, 0);
+        svg.setPointerCapture = capture;
+      },
+      [pointerType, y],
+    );
+
+  await gesture("touch", 100); // No pen so far, so a finger draws.
+  await expect.poll(() => inkIds(viewer)).toHaveLength(1);
+  await gesture("pen", 200);
+  await expect.poll(() => inkIds(viewer)).toHaveLength(2);
+  await gesture("touch", 300); // A palm now.
+  await controls.waitForTimeout(200);
+  expect(await inkIds(viewer)).toHaveLength(2);
+
+  await expect
+    .poll(async () => {
+      const html = await (await server.request("GET", `/controls/${deckSlug}/export`)).text();
+      const data = JSON.parse(/id="live-data">(.*?)<\/script>/.exec(html)![1]!) as {
+        items: { data: { pen?: boolean; points: number[][] } }[];
+      };
+      return data.items.find((item) => item.data.pen)?.data.points.map((p) => p[2]);
+    })
+    .toEqual([0.2, 0.6, 0.9]);
+
+  await tool(controls, "Text");
+  await gesture("touch", 400);
+  await expect(controls.locator(".live-text-editor")).toBeFocused();
+});

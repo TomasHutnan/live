@@ -20,6 +20,4 @@ RUN mkdir /data && chown node:node /data
 USER node
 VOLUME /data
 EXPOSE 8090
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD node -e "fetch('http://127.0.0.1:8090/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["node", "dist/server.js"]

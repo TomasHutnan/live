@@ -12,6 +12,19 @@ export function insertBeforeBodyEnd(html: string, snippet: string): string {
   return html.slice(0, last) + snippet + html.slice(last);
 }
 
+/** Makes JSON safe inside a script element: no "<" means no "</script>". */
+export function jsonForScript(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+/** The exported file: the original deck plus its ink and the offline runtime. */
+export function annotatedDeck(original: string, data: unknown, runtime: string): string {
+  const snippet =
+    `<script type="application/json" id="live-data">${jsonForScript(data)}</script>\n` +
+    `<script>${runtime}</script>\n`;
+  return insertBeforeBodyEnd(original, snippet);
+}
+
 function decodeEntities(text: string): string {
   return text
     .replace(/&lt;/g, "<")

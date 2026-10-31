@@ -1,14 +1,15 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import type Database from "better-sqlite3";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import QRCode from "qrcode";
 import { isValidSlug, RESERVED_SLUGS } from "../shared/slug.ts";
-import { type Asset, loadAssets } from "./assets.ts";
+import { type Asset, etagMatches, loadAssets } from "./assets.ts";
 import { BasicAuth } from "./auth.ts";
 import { type Config, decksDir } from "./config.ts";
 import { DeckFiles, MAX_UPLOAD_BYTES, UploadError } from "./decks.ts";
+import { annotatedDeck } from "./inject.ts";
 import { allowsUnsafeRequest, originMatches } from "./origin.ts";
 import { dashboardPage, notFoundPage } from "./pages.ts";
 import { Rooms } from "./rooms.ts";
@@ -53,7 +54,7 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
   function sendDeck(request: FastifyRequest, reply: FastifyReply, deck: Deck, cache: string) {
     const etag = `"${deck.hash}"`;
     reply.header("ETag", etag).header("Cache-Control", cache);
-    if (request.headers["if-none-match"] === etag) return reply.code(304).send();
+    if (etagMatches(request.headers["if-none-match"], etag)) return reply.code(304).send();
     return reply.type(HTML).send(createReadStream(files.servedPath(deck)));
   }
 
@@ -72,7 +73,7 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
 
   function sendAsset(request: FastifyRequest, reply: FastifyReply, asset: Asset) {
     reply.header("ETag", asset.etag).header("Cache-Control", "no-cache");
-    if (request.headers["if-none-match"] === asset.etag) return reply.code(304).send();
+    if (etagMatches(request.headers["if-none-match"], asset.etag)) return reply.code(304).send();
     return reply.type(asset.type).send(asset.body);
   }
 
@@ -233,6 +234,21 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
       socket.on("close", () => rooms.leave(peer));
       socket.on("error", () => socket.terminate());
     },
+  );
+
+  app.get("/controls/:slug/export", guarded, async (request, reply) =>
+    withSession(request, reply, (session, deck) => {
+      const runtime = assets.get("export-runtime.js");
+      if (!runtime) throw new Error("export runtime is missing from the build");
+      const html = readFileSync(files.originalPath(deck), "utf8");
+      const body = annotatedDeck(html, { items: store.liveItems(session.slug) }, runtime.body.toString("utf8"));
+      const date = new Date().toISOString().slice(0, 10);
+      return reply
+        .type(HTML)
+        .header("Cache-Control", "no-store")
+        .header("Content-Disposition", `attachment; filename="${session.slug}-${date}-annotated.html"`)
+        .send(body);
+    }),
   );
 
   // Viewer. Fixed routes above win over this one.

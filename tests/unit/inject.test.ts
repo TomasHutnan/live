@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  annotatedDeck,
   CLIENT_TAG,
   deckTitle,
   hasRevealInitialize,
   insertBeforeBodyEnd,
+  jsonForScript,
   relativeReferences,
 } from "../../src/server/inject.ts";
 
@@ -60,5 +62,22 @@ describe("deck inspection", () => {
       <a href="other.html">link</a>
       <script>const s = '<img src="not-a-ref.png">';</script>`;
     expect(relativeReferences(html).sort()).toEqual(["./a.css", "figures/b.png", "figures/c.png", "lib/reveal.js"]);
+  });
+});
+
+describe("annotated export", () => {
+  it("escapes every < in the embedded data, so ink text can't end the script", () => {
+    const text = "</script><script>alert(1)</script><!--";
+    const json = jsonForScript({ items: [{ text }] });
+    expect(json).not.toContain("<");
+    expect((JSON.parse(json) as { items: { text: string }[] }).items[0]?.text).toBe(text);
+  });
+
+  it("starts from the original deck and adds data and runtime before the last </body>", () => {
+    const out = annotatedDeck('<body>"</body>"<p>x</p></body></html>', { items: [] }, "RUNTIME");
+    expect(out).toBe(
+      '<body>"</body>"<p>x</p><script type="application/json" id="live-data">{"items":[]}</script>\n<script>RUNTIME</script>\n</body></html>',
+    );
+    expect(out).not.toContain("live-client");
   });
 });

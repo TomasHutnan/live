@@ -1,4 +1,4 @@
-import type { Position, Question, ServerMessage } from "../shared/protocol.ts";
+import type { Position, Question, Screen, ServerMessage } from "../shared/protocol.ts";
 import { Connection, type ConnectionState } from "./connection.ts";
 import { Ink, uuid } from "./ink.ts";
 import { JoinCode } from "./join.ts";
@@ -8,7 +8,7 @@ import type { PreviewReply, PreviewRequest } from "./preview.ts";
 import { questionRow, Questions } from "./questions.ts";
 import { onNavigation, readPosition, type RevealApi, samePosition } from "./reveal.ts";
 import { addStyles } from "./style.ts";
-import { audienceText } from "./viewer.ts";
+import { audienceText, questionScreen } from "./viewer.ts";
 
 const COLORS = ["#111111", "#d3261e", "#1f5fbf", "#1a8a4a", "#e08a00", "#ffffff"];
 const WIDTHS = [
@@ -29,6 +29,7 @@ const ICONS: Record<string, string> = {
   prev: "M15 5l-7 7 7 7",
   next: "M9 5l7 7-7 7",
   panel: "M4 5h16v14H4zM15 5v14",
+  questions: "M4 5h16v11H10l-4 4v-4H4z",
   qr: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2M14 20h6v-2",
 };
 
@@ -95,6 +96,7 @@ export function startControls(reveal: RevealApi, slug: string): void {
   const pen = new Pen(overlay, ink, connection, settings);
   const questions = new Questions(connection, slug);
   const join = new JoinCode(reveal, slug, audienceText().join);
+  const wall = questionScreen(reveal);
 
   // Toolbar
 
@@ -182,7 +184,8 @@ export function startControls(reveal: RevealApi, slug: string): void {
   button("Previous step", icon("prev"), () => reveal.prev());
   button("Next step", icon("next"), () => reveal.next());
   gap();
-  const joinButton = button("Show join code (Q)", icon("qr"), toggleJoin);
+  const joinButton = button("Show join code (Q)", icon("qr"), () => toggleScreen("join"));
+  const wallButton = button("Show questions (W)", icon("questions"), () => toggleScreen("questions"));
   const panelButton = button("Toggle side panel", icon("panel"), () => {
     root.classList.toggle("live-panel-closed");
     if (!root.classList.contains("live-panel-closed")) setUnread(0);
@@ -200,15 +203,19 @@ export function startControls(reveal: RevealApi, slug: string): void {
     unreadBadge.hidden = value === 0;
   }
 
-  function showJoin(shown: boolean): void {
-    join.shown = shown;
-    joinButton.setAttribute("aria-pressed", String(shown));
+  let screen: Screen = null;
+  function showScreen(shown: Screen): void {
+    screen = shown;
+    join.shown = shown === "join";
+    wall.shown = shown === "questions";
+    joinButton.setAttribute("aria-pressed", String(shown === "join"));
+    wallButton.setAttribute("aria-pressed", String(shown === "questions"));
   }
 
-  function toggleJoin(): void {
-    const shown = !join.shown;
-    showJoin(shown);
-    questions.send({ t: "join", shown });
+  function toggleScreen(choice: Exclude<Screen, null>): void {
+    const shown = screen === choice ? null : choice;
+    showScreen(shown);
+    questions.send({ t: "screen", screen: shown });
   }
 
   // Side panel. Sections stack in a flex column, so another can join them.
@@ -337,6 +344,7 @@ export function startControls(reveal: RevealApi, slug: string): void {
   }
 
   function showQuestions(): void {
+    wall.show(questions.sorted());
     questionsHeading.textContent = questions.open ? `Questions (${questions.open})` : "Questions";
     const rows = questions.sorted().map(presenterRow);
     if (rows.length) {
@@ -417,7 +425,7 @@ export function startControls(reveal: RevealApi, slug: string): void {
         if (message.role !== "presenter") return;
         ink.onSnapshot(message.items, message.live, pen.drawingId);
         questions.onSnapshot(message.questions);
-        showJoin(message.join);
+        showScreen(message.screen);
         // A move the server never confirmed, made during a drop, goes out now.
         // Otherwise the server decides.
         if (unconfirmedMove) connection.send({ t: "position", m: unconfirmedMove, position: readPosition(reveal) });
@@ -430,8 +438,8 @@ export function startControls(reveal: RevealApi, slug: string): void {
       case "position":
         move(message.position);
         break;
-      case "join":
-        showJoin(message.shown);
+      case "screen":
+        showScreen(message.screen);
         break;
       case "presence":
         viewers.textContent = `${message.viewers} viewer${message.viewers === 1 ? "" : "s"}`;
@@ -459,11 +467,13 @@ export function startControls(reveal: RevealApi, slug: string): void {
     }
   });
 
-  // Q raises the join code. Reveal has no binding for it either.
+  // Q and W raise the full screens. Reveal has no binding for either.
   document.addEventListener("keydown", (event) => {
-    if (event.key.toLowerCase() !== "q" || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
     if (document.activeElement instanceof HTMLTextAreaElement) return;
-    toggleJoin();
+    const key = event.key.toLowerCase();
+    if (key === "q") toggleScreen("join");
+    else if (key === "w") toggleScreen("questions");
   });
 
   chooseTool("navigate");

@@ -110,7 +110,11 @@ are sent after the reconnect.
 The audience asks from **Otázky** in the bar at the bottom of the viewer page and supports each
 other's questions. They appear in **Questions** in the side panel, most supported first. **Slide N**
 jumps to where a question was asked, **Answered** moves it down the list for everyone, and **Remove**
-takes it away for everyone. With the panel closed, a badge counts new questions.
+takes it away for everyone. With the panel closed, a badge counts new questions. `W` or the toolbar
+button puts the five most supported open questions on screen for the room, and they update live.
+
+To project, open the viewer link and press `F11`. In fullscreen the page hides **Naživo**, **Otázky**
+and **Prechádzať**, so only the deck shows. Reconnect and session-over messages still appear.
 
 Removing a session permanently deletes its ink and questions, so the dashboard asks you to type the slug and
 offers the export first. Decks can be deleted once no session uses them.
@@ -224,8 +228,9 @@ question text with `textContent`.
 
 `src/client/join.ts` draws the code over the deck rather than adding a slide, so indices, stored ink
 and the export are untouched. A card shows by itself on the first slide, and `Q` or the toolbar button
-shows it full screen on any slide, through a presenter-only `join` message. Small screens never show
-it, because anyone on one has already joined. Long titles can run under the card.
+shows it full screen on any slide, through a presenter-only `screen` message. That message also carries
+the full-screen questions, so only one of the two is up at a time. Small screens never show either, and
+phones keep their own controls even in fullscreen. Long titles can run under the card.
 
 `GET /:slug/qr.svg` is public, because a projected viewer tab has no credentials, and it only holds the
 viewer link.

@@ -14,6 +14,9 @@ export const HIGHLIGHTER_OPACITY = 0.35;
 export const COORD_DECIMALS = 1;
 export const PRESSURE_DECIMALS = 2;
 
+/** Questions on the full-screen list. More would need smaller text than a room can read. */
+export const QUESTION_SCREEN_ROWS = 5;
+
 /** Extra reach of the eraser around the pointer, in slide units. */
 export const ERASER_RADIUS = 10;
 

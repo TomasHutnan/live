@@ -1,8 +1,8 @@
-import { MAX_QUESTION_TEXT, type Position, type Question, type ServerMessage } from "../shared/protocol.ts";
+import { MAX_QUESTION_TEXT, type Position, type Question, type Screen, type ServerMessage } from "../shared/protocol.ts";
 import { Connection } from "./connection.ts";
 import { JoinCode } from "./join.ts";
 import { applyInkMessage, Overlay } from "./overlay.ts";
-import { questionRow, Questions, type Rejected } from "./questions.ts";
+import { QuestionScreen, questionRow, Questions, type Rejected } from "./questions.ts";
 import { onNavigation, readPosition, type RevealApi, samePosition } from "./reveal.ts";
 import { addStyles } from "./style.ts";
 
@@ -21,6 +21,7 @@ const STRINGS = {
     send: "Odoslať",
     close: "Zavrieť",
     noQuestions: "Zatiaľ žiadne otázky.",
+    moreQuestions: "Ďalšie otázky:",
     answered: "Zodpovedané",
     vote: "Podporiť otázku",
     rate: "Posielate príliš rýchlo. Skúste to o chvíľu.",
@@ -39,6 +40,7 @@ const STRINGS = {
     send: "Send",
     close: "Close",
     noQuestions: "No questions yet.",
+    moreQuestions: "More questions:",
     answered: "Answered",
     vote: "Support this question",
     rate: "You're sending too fast. Try again in a moment.",
@@ -47,6 +49,24 @@ const STRINGS = {
 };
 
 export const audienceText = () => (document.documentElement.lang.startsWith("sk") ? STRINGS.sk : STRINGS.en);
+
+export const questionScreen = (reveal: RevealApi) => {
+  const text = audienceText();
+  return new QuestionScreen(reveal.getRevealElement(), {
+    heading: text.questions,
+    empty: text.noQuestions,
+    more: text.moreQuestions,
+  });
+};
+
+/**
+ * True in the Fullscreen API and in the browser's own F11 mode, which that API
+ * can't see. There, the window simply fills the screen.
+ */
+function isFullscreen(): boolean {
+  if (document.fullscreenElement) return true;
+  return screen.width - window.innerWidth <= 1 && screen.height - window.innerHeight <= 1;
+}
 
 export function startViewer(reveal: RevealApi, slug: string): void {
   addStyles();
@@ -161,6 +181,7 @@ export function startViewer(reveal: RevealApi, slug: string): void {
   }
 
   function showQuestions(): void {
+    wall.show(questions.sorted());
     askCount.textContent = questions.open ? String(questions.open) : "";
     const rows = questions.sorted().map((question) => {
       if (!question.answered) return questionRow(question, voteButton(question));
@@ -207,15 +228,15 @@ export function startViewer(reveal: RevealApi, slug: string): void {
         overlay.setItems(message.items);
         overlay.setLive(message.live);
         questions.onSnapshot(message.questions);
-        join.shown = message.join;
+        showScreen(message.screen);
         follow();
         break;
       case "position":
         live = message.position;
         follow();
         break;
-      case "join":
-        join.shown = message.shown;
+      case "screen":
+        showScreen(message.screen);
         break;
       case "session.removed":
         over.hidden = false;
@@ -239,6 +260,19 @@ export function startViewer(reveal: RevealApi, slug: string): void {
     },
   });
   const join = new JoinCode(reveal, slug, text.join);
+  const wall = questionScreen(reveal);
+  function showScreen(shown: Screen): void {
+    join.shown = shown === "join";
+    wall.shown = shown === "questions";
+  }
+
+  // A projected page shows the deck and nothing else. Reconnect and session-over
+  // messages still appear: those need the presenter's attention.
+  const syncFullscreen = () => root.classList.toggle("live-fullscreen", isFullscreen());
+  window.addEventListener("resize", syncFullscreen);
+  document.addEventListener("fullscreenchange", syncFullscreen);
+  syncFullscreen();
+
   const questions = new Questions(connection, slug);
   const refused: Record<Rejected, string> = { rate: text.rate, full: text.full };
   questions.onChange = showQuestions;

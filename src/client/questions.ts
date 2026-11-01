@@ -1,10 +1,11 @@
 import type { PresenterMessage, Question, ServerMessage, Slide, ViewerQuestionMessage } from "../shared/protocol.ts";
 import type { Connection } from "./connection.ts";
 import { uuid } from "./ink.ts";
+import { QUESTION_SCREEN_ROWS } from "./tuning.ts";
 
 type Sendable =
   | ViewerQuestionMessage
-  | Extract<PresenterMessage, { t: "question.answer" | "question.remove" | "join" }>;
+  | Extract<PresenterMessage, { t: "question.answer" | "question.remove" | "screen" }>;
 type Draft<M> = M extends unknown ? Omit<M, "m"> : never;
 
 export type Rejected = Extract<ServerMessage, { t: "question.rejected" }>["reason"];
@@ -180,4 +181,51 @@ export function questionRow(question: Question, ...actions: Node[]): HTMLLIEleme
   bar.append(...actions);
   row.append(text, bar);
   return row;
+}
+
+function div(className: string, text = ""): HTMLDivElement {
+  const node = document.createElement("div");
+  node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+/**
+ * Open questions for the whole room, most supported first. Like the join code it
+ * sits over the deck, inside the reveal element. It uses plain divs because
+ * reveal styles lists and headings in there.
+ */
+export class QuestionScreen {
+  private readonly root = div("live-question-screen");
+  private readonly rows = div("live-screen-rows");
+  private readonly more = div("live-screen-more");
+
+  constructor(
+    parent: HTMLElement,
+    private readonly words: { heading: string; empty: string; more: string },
+  ) {
+    const inner = div("live-screen-inner");
+    inner.append(div("live-screen-heading", words.heading), this.rows, this.more);
+    this.root.append(inner);
+    this.root.hidden = true;
+    parent.append(this.root);
+  }
+
+  set shown(value: boolean) {
+    this.root.hidden = !value;
+  }
+
+  show(questions: Question[]): void {
+    const open = questions.filter((question) => !question.answered);
+    this.rows.replaceChildren(
+      ...open.slice(0, QUESTION_SCREEN_ROWS).map((question) => {
+        const row = div("live-screen-row");
+        row.append(div("live-screen-votes", `▲ ${question.votes}`), div("live-screen-text", question.text));
+        return row;
+      }),
+    );
+    if (open.length === 0) this.rows.append(div("live-screen-empty", this.words.empty));
+    const hidden = open.length - QUESTION_SCREEN_ROWS;
+    this.more.textContent = hidden > 0 ? `${this.words.more} ${hidden}` : "";
+  }
 }

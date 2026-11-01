@@ -83,7 +83,7 @@ describe("rooms", () => {
       expect(socket.of("snapshot")[0]?.role).toBe("viewer");
     });
 
-    it.each(["position", "stroke.start", "stroke.points", "stroke.end", "item.add", "item.remove", "item.restore", "slide.clear", "question.answer", "question.remove", "join"])(
+    it.each(["position", "stroke.start", "stroke.points", "stroke.end", "item.add", "item.remove", "item.restore", "slide.clear", "question.answer", "question.remove", "screen"])(
       "disconnects a viewer sending %s and changes nothing",
       (t) => {
         const { socket, peer } = connect();
@@ -447,22 +447,22 @@ describe("rooms", () => {
     });
   });
 
-  describe("join code", () => {
+  describe("full screens", () => {
     it("reaches everyone else and late joiners, and is not lost on the presenter's reconnect", () => {
       const a = connect();
       const p = presenter();
-      send(p.peer, { t: "join", m: "1", shown: true });
-      expect(a.socket.of("join")[0]?.shown).toBe(true);
-      expect(p.socket.of("join")).toEqual([]);
+      send(p.peer, { t: "screen", m: "1", screen: "questions" });
+      expect(a.socket.of("screen")[0]?.screen).toBe("questions");
+      expect(p.socket.of("screen")).toEqual([]);
       expect(p.socket.of("ack").map((m) => m.m)).toEqual(["1"]);
-      expect(connect().socket.of("snapshot")[0]?.join).toBe(true);
+      expect(connect().socket.of("snapshot")[0]?.screen).toBe("questions");
       rooms.leave(p.peer);
-      expect(presenter().socket.of("snapshot").at(-1)?.join).toBe(true);
+      expect(presenter().socket.of("snapshot").at(-1)?.screen).toBe("questions");
     });
 
-    it("rejects a malformed message", () => {
+    it("rejects an unknown screen", () => {
       const p = presenter();
-      send(p.peer, { t: "join", m: "1", shown: "yes" });
+      send(p.peer, { t: "screen", m: "1", screen: "poll" });
       expect(p.socket.closed).toBe(CLOSE.invalid);
     });
   });

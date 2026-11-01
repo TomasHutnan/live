@@ -57,8 +57,11 @@ test("controls flow: connect, navigate, draw, text, undo, panel, reconnect", asy
   await controls.keyboard.press("q");
   await expect(viewer.locator(".live-join")).toHaveClass(/live-join-full/);
   await expect.poll(() => viewer.locator(".live-join img").evaluate((i) => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-  await controls.keyboard.press("q");
+  await controls.keyboard.press("w");
+  await expect(viewer.locator(".live-screen-text")).toHaveText("Otázka z prehliadača");
+  await controls.keyboard.press("w");
   await expect(viewer.locator(".live-join")).toBeHidden();
+  await expect(viewer.locator(".live-question-screen")).toBeHidden();
 
   await tool(controls, "Pen");
   await proxy.down();

@@ -185,3 +185,89 @@ test("the code is public, holds the viewer link, and 404s for an unknown session
   expect(await response.text()).toContain("<svg");
   expect((await fetch(`${server.url}/${nextSlug()}/qr.svg`)).status).toBe(404);
 });
+
+test("questions go full screen for the room, replace the join code, and follow votes and answers", async ({ browser, server, deckSlug }) => {
+  const controls = await (await presenterContext(browser)).newPage();
+  await controls.goto(`${server.url}/controls/${deckSlug}`);
+  await connected(controls);
+  const projector = await (await browser.newContext()).newPage();
+  await projector.goto(`${server.url}/${deckSlug}`);
+  await connected(projector);
+  const phone = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  await phone.goto(`${server.url}/${deckSlug}`);
+  await connected(phone);
+
+  const wall = projector.locator(".live-question-screen");
+  await expect(wall).toBeHidden();
+  await controls.keyboard.press("q");
+  await expect(projector.locator(".live-join-full")).toBeVisible();
+  await controls.keyboard.press("w");
+  await expect(wall).toBeVisible();
+  await expect(projector.locator(".live-join-full")).toHaveCount(0);
+  await expect(wall).toContainText("Zatiaľ žiadne otázky.");
+  await expect(controls.getByRole("button", { name: "Show questions (W)" })).toHaveAttribute("aria-pressed", "true");
+  await expect(controls.getByRole("button", { name: "Show join code (Q)" })).toHaveAttribute("aria-pressed", "false");
+  await expect(phone.locator(".live-question-screen")).toBeHidden();
+
+  for (const text of ["Jedna", "Dve", "<b>Tri</b>", "Štyri", "Päť"]) await ask(phone, text);
+  await ask(projector, "Šesť");
+  await expect(wall.locator(".live-screen-row")).toHaveCount(5);
+  await expect(wall.locator(".live-screen-more")).toHaveText("Ďalšie otázky: 1");
+  await expect(wall.locator(".live-screen-text").nth(2)).toHaveText("<b>Tri</b>");
+
+  const panelRows = controls.locator(".live-panel .live-question");
+  await expect(panelRows).toHaveCount(6);
+  await phone.locator(".live-sheet .live-question").filter({ hasText: "Šesť" }).locator(".live-vote").click();
+  await expect(wall.locator(".live-screen-row").first()).toContainText("Šesť");
+  await panelRows.first().getByRole("button", { name: "Answered" }).click();
+  await expect(wall.locator(".live-screen-row").first()).toContainText("Jedna");
+  await expect(wall.locator(".live-screen-more")).toBeHidden();
+
+  // A viewer joining now sees it too.
+  const late = await (await browser.newContext()).newPage();
+  await late.goto(`${server.url}/${deckSlug}`);
+  await connected(late);
+  await expect(late.locator(".live-question-screen")).toBeVisible();
+  await tool(controls, "Show questions (W)");
+  await expect(wall).toBeHidden();
+  await expect(late.locator(".live-question-screen")).toBeHidden();
+});
+
+test("a fullscreen viewer page hides its controls, in the Fullscreen API and in F11", async ({ browser, server, deckSlug }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, screen: { width: 1920, height: 1080 } })).newPage();
+  await page.goto(`${server.url}/${deckSlug}`);
+  await connected(page);
+  const pill = page.locator(".live-pill");
+  await expect(pill).toBeVisible();
+  await page.locator(".live-ask").click();
+  await expect(page.locator(".live-sheet")).toBeVisible();
+
+  await page.locator(".live-sheet h2").evaluate((heading) => {
+    heading.addEventListener("click", () => void document.documentElement.requestFullscreen(), { once: true });
+  });
+  await page.locator(".live-sheet h2").click();
+  await expect(pill).toBeHidden();
+  await expect(page.locator(".live-sheet")).toBeHidden();
+  await page.evaluate(() => document.exitFullscreen());
+  await expect(pill).toBeVisible();
+
+  // F11 is invisible to the Fullscreen API: the window just fills the screen.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect(pill).toBeHidden();
+  // Playwright's emulated screen follows the viewport. A real one stays put.
+  await page.evaluate(() => {
+    Object.defineProperty(screen, "width", { value: 1920 });
+    Object.defineProperty(screen, "height", { value: 1080 });
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(pill).toBeVisible();
+});
+
+test("a phone keeps its controls even when its window fills the screen", async ({ browser, server, deckSlug }) => {
+  const size = { width: 390, height: 844 };
+  const phone = await (await browser.newContext({ viewport: size, screen: size })).newPage();
+  await phone.goto(`${server.url}/${deckSlug}`);
+  await connected(phone);
+  await expect(phone.locator("html")).toHaveClass(/live-fullscreen/);
+  await expect(phone.locator(".live-pill")).toBeVisible();
+});

@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   type PresenterMessage,
   presenterValidators,
+  type Screen,
   type ServerMessage,
   type ViewerQuestionMessage,
   viewerValidators,
@@ -65,8 +66,8 @@ function withinLimit(recent: number[], now: number, limit: number): boolean {
 }
 
 class Room {
-  /** Whether the join code is up, full screen. Ends with the room. */
-  join = false;
+  /** What is up over the deck. Ends with the room. */
+  screen: Screen = null;
   readonly peers = new Set<Peer>();
   readonly live = new Map<string, LiveStroke & { owner: Peer }>();
 
@@ -130,7 +131,7 @@ export class Rooms {
     "slide.clear": (room, peer, m) => this.onSlideClear(room, peer, m),
     "question.answer": (room, peer, m) => this.onAnswer(room, peer, m),
     "question.remove": (room, peer, m) => this.onQuestionRemove(room, peer, m),
-    join: (room, peer, m) => this.onJoin(room, peer, m),
+    screen: (room, peer, m) => this.onScreen(room, peer, m),
   };
 
   // Tokens
@@ -181,7 +182,7 @@ export class Rooms {
       viewers: room.counts().viewers,
       session: { title: room.title, state: "active" },
       questions: this.store.questions(room.slug),
-      join: room.join,
+      screen: room.screen,
     });
   }
 
@@ -350,9 +351,9 @@ export class Rooms {
     peer.send({ t: "ack", m });
   }
 
-  private onJoin(room: Room, peer: Peer, { m, shown }: { m: string; shown: boolean }): void {
-    room.join = shown;
-    room.broadcast({ t: "join", shown }, peer);
+  private onScreen(room: Room, peer: Peer, { m, screen }: { m: string; screen: Screen }): void {
+    room.screen = screen;
+    room.broadcast({ t: "screen", screen }, peer);
     peer.send({ t: "ack", m });
   }
 

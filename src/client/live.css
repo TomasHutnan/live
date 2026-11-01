@@ -45,7 +45,11 @@ html.live-viewer .slide-menu-button { display: none !important; }
   border-radius: 6px;
   font: 14px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-.live-banner[hidden], .live-over[hidden], .live-sheet[hidden], .live-join[hidden], .live-badge[hidden] { display: none; }
+.live-banner[hidden], .live-over[hidden], .live-sheet[hidden], .live-join[hidden], .live-question-screen[hidden], .live-badge[hidden] { display: none; }
+/* Phone-sized windows keep their controls: asking is what they're there for. */
+@media (min-width: 821px) {
+  html.live-fullscreen .live-pill, html.live-fullscreen .live-sheet { display: none; }
+}
 
 .live-over {
   position: fixed;
@@ -114,8 +118,39 @@ html.live-viewer .slide-menu-button { display: none !important; }
 .live-join-full .live-join-words span { margin-top: 2cqh; font-size: 3.6cqh; color: #333; }
 /* Anyone on a small screen has already joined, and the code would only hide the slide. */
 @media (max-width: 820px), (max-height: 500px) {
-  html.live-viewer .live-join { display: none; }
+  html.live-viewer .live-join, html.live-viewer .live-question-screen { display: none; }
 }
+
+/* Questions for the room */
+
+.live-question-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 51;
+  container-type: size;
+  background: #fff;
+  color: #111;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+}
+.live-screen-inner { box-sizing: border-box; height: 100%; padding: 5cqh 6cqw; display: flex; flex-direction: column; gap: 2cqh; }
+.live-screen-heading { font-size: 5cqh; font-weight: 600; }
+.live-screen-rows { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2cqh; }
+.live-screen-row { display: grid; grid-template-columns: 9cqh 1fr; gap: 2cqw; align-items: baseline; }
+.live-screen-votes { font-size: 3cqh; font-weight: 600; color: #1f5fbf; white-space: nowrap; }
+.live-screen-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 3.6cqh;
+  line-height: 1.3;
+}
+.live-screen-empty { font-size: 3.6cqh; color: #62625c; }
+.live-screen-more { font-size: 2.8cqh; color: #62625c; }
+.live-screen-more:empty { display: none; }
 
 /* Questions */
 

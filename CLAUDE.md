@@ -110,6 +110,8 @@ docker run --rm --network host --ipc=host -v "$PWD":/work -w /work -e LIVE_E2E_W
   from viewers, and `viewerValidators` checks their messages first.
 - The join code stays an overlay. A real or injected slide would shift every `h` index, which breaks
   stored ink, position and the export.
+- Fullscreen detection covers F11, which the Fullscreen API can't see, by comparing the window to the
+  screen. Keep the `min-width` guard on hiding: a phone's window can match its screen, and phones ask.
 - Viewer rate limits stay per connection, never per IP, because a university shares one IP.
 - Inject before the last `</body>` only. Export starts from the original deck, not the served copy.
 - Keep `keepSlideView()`: below 435 px reveal switches to scroll view, which breaks phones in portrait

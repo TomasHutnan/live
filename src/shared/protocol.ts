@@ -75,6 +75,9 @@ export interface Question {
 
 export type SessionState = "active";
 
+/** What the presenter has put over the deck, for everyone. Only one at a time. */
+export type Screen = "join" | "questions" | null;
+
 // Server to client.
 export type ServerMessage = { v: number } & (
   | {
@@ -86,8 +89,7 @@ export type ServerMessage = { v: number } & (
       viewers: number;
       session: { title: string; state: SessionState };
       questions: Question[];
-      /** True while the presenter is showing the join code full screen. */
-      join: boolean;
+      screen: Screen;
     }
   | { t: "position"; position: Position }
   | { t: "stroke.start"; stroke: Omit<LiveStroke, "points"> }
@@ -100,7 +102,7 @@ export type ServerMessage = { v: number } & (
   | { t: "question.update"; question: Question }
   | { t: "question.remove"; id: string }
   | { t: "question.rejected"; m: string; reason: "rate" | "full" }
-  | { t: "join"; shown: boolean }
+  | { t: "screen"; screen: Screen }
   | { t: "presence"; viewers: number; presenters: number }
   | { t: "session.removed" }
   | { t: "ack"; m: string }
@@ -121,7 +123,7 @@ export type PresenterMessage =
   | { t: "stroke.points"; id: string; points: Point[] }
   | { t: "question.answer"; m: string; id: string; answered: boolean }
   | { t: "question.remove"; m: string; id: string }
-  | { t: "join"; m: string; shown: boolean }
+  | { t: "screen"; m: string; screen: Screen }
   | Mutation;
 
 export type ViewerQuestionMessage =
@@ -141,7 +143,7 @@ export const PRESENTER_TYPES: ReadonlySet<string> = new Set([
   "slide.clear",
   "question.answer",
   "question.remove",
-  "join",
+  "screen",
 ]);
 
 // Close codes.
@@ -224,7 +226,7 @@ export const presenterValidators: Record<PresenterMessage["t"], (m: Record<strin
     isMsgId(m.m) && isSlide(m.slide) && Array.isArray(m.ids) && m.ids.length <= MAX_IDS && m.ids.every(isId),
   "question.answer": (m) => isMsgId(m.m) && isId(m.id) && typeof m.answered === "boolean",
   "question.remove": (m) => isMsgId(m.m) && isId(m.id),
-  join: (m) => isMsgId(m.m) && typeof m.shown === "boolean",
+  screen: (m) => isMsgId(m.m) && (m.screen === "join" || m.screen === "questions" || m.screen === null),
 };
 
 const isQuestionText = (x: unknown) => typeof x === "string" && x.trim().length > 0 && x.length <= MAX_QUESTION_TEXT;

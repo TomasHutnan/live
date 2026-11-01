@@ -83,7 +83,7 @@ describe("rooms", () => {
       expect(socket.of("snapshot")[0]?.role).toBe("viewer");
     });
 
-    it.each(["position", "stroke.start", "stroke.points", "stroke.end", "item.add", "item.remove", "item.restore", "slide.clear"])(
+    it.each(["position", "stroke.start", "stroke.points", "stroke.end", "item.add", "item.remove", "item.restore", "slide.clear", "question.answer", "question.remove", "join"])(
       "disconnects a viewer sending %s and changes nothing",
       (t) => {
         const { socket, peer } = connect();
@@ -95,7 +95,7 @@ describe("rooms", () => {
     );
 
     it("rejects unknown types for both roles, and prototype keys", () => {
-      for (const t of ["question.ask", "constructor", "__proto__", "toString"]) {
+      for (const t of ["poll.start", "constructor", "__proto__", "toString"]) {
         const v = connect();
         send(v.peer, { t });
         expect(v.socket.closed).toBe(CLOSE.invalid);
@@ -310,6 +310,160 @@ describe("rooms", () => {
       expect(socket.terminated).toBe(false);
       rooms.heartbeat();
       expect(socket.terminated).toBe(true);
+    });
+  });
+
+  describe("questions", () => {
+    const voter = randomUUID();
+    const ask = (peer: Peer, id = randomUUID(), by = voter, text = "Prečo?") => {
+      send(peer, { t: "question.ask", m: randomUUID(), voter: by, question: { id, text, slide: { h: 3, v: 1 } } });
+      return id;
+    };
+    const vote = (peer: Peer, id: string, by: string, on = true) =>
+      send(peer, { t: "question.vote", m: randomUUID(), id, voter: by, on });
+
+    it("shows a question to everyone with the asker's vote, and to late joiners", () => {
+      const a = connect();
+      const b = connect();
+      const p = presenter();
+      const id = ask(a.peer);
+      const expected = { id, text: "Prečo?", slide: { h: 3, v: 1 }, votes: 1, answered: false };
+      for (const socket of [a.socket, b.socket, p.socket]) expect(socket.of("question.add")[0]?.question).toEqual(expected);
+      expect(a.socket.of("ack")).toHaveLength(1);
+      expect(connect().socket.of("snapshot")[0]?.questions).toEqual([expected]);
+    });
+
+    it("treats a resent question as the same one", () => {
+      const a = connect();
+      const id = ask(a.peer);
+      ask(a.peer, id);
+      expect(store.questions(SLUG)).toHaveLength(1);
+      expect(a.socket.of("question.add")).toHaveLength(1);
+      expect(a.socket.of("ack")).toHaveLength(2);
+    });
+
+    it("counts one vote per voter, and a vote can be taken back", () => {
+      const a = connect();
+      const id = ask(a.peer);
+      const other = randomUUID();
+      vote(a.peer, id, other);
+      vote(a.peer, id, other);
+      vote(a.peer, id, voter);
+      expect(store.question(SLUG, id)?.votes).toBe(2);
+      expect(a.socket.of("question.update")).toHaveLength(1);
+      vote(a.peer, id, other, false);
+      expect(a.socket.of("question.update").at(-1)?.question.votes).toBe(1);
+    });
+
+    it("keeps a removed question removed, even if it is resent", () => {
+      const a = connect();
+      const p = presenter();
+      const id = ask(a.peer);
+      send(p.peer, { t: "question.remove", m: "r", id });
+      expect(a.socket.of("question.remove")[0]?.id).toBe(id);
+      ask(a.peer, id);
+      vote(a.peer, id, randomUUID());
+      expect(store.questions(SLUG)).toEqual([]);
+      expect(connect().socket.of("snapshot")[0]?.questions).toEqual([]);
+    });
+
+    it("marks a question answered and back", () => {
+      const a = connect();
+      const p = presenter();
+      const id = ask(a.peer);
+      send(p.peer, { t: "question.answer", m: "1", id, answered: true });
+      send(p.peer, { t: "question.answer", m: "2", id, answered: true });
+      expect(a.socket.of("question.update").map((m) => m.question.answered)).toEqual([true]);
+      send(p.peer, { t: "question.answer", m: "3", id, answered: false });
+      expect(store.question(SLUG, id)?.answered).toBe(false);
+    });
+
+    it("can't reach a question in another session", () => {
+      const a = connect();
+      const p = presenter("other");
+      const id = ask(a.peer);
+      send(p.peer, { t: "question.remove", m: "1", id });
+      send(p.peer, { t: "question.answer", m: "2", id, answered: true });
+      const o = connect("other");
+      vote(o.peer, id, randomUUID());
+      expect(store.question(SLUG, id)).toMatchObject({ votes: 1, answered: false });
+    });
+
+    it("limits asks per connection and lets them through again later", () => {
+      const a = connect();
+      for (let i = 0; i < 5; i++) ask(a.peer);
+      const refused = ask(a.peer);
+      expect(a.socket.of("question.rejected")[0]?.reason).toBe("rate");
+      expect(store.question(SLUG, refused)).toBeUndefined();
+      now += 60_001;
+      ask(a.peer, refused);
+      expect(store.questions(SLUG)).toHaveLength(6);
+    });
+
+    it("limits votes per connection", () => {
+      const a = connect();
+      const id = ask(a.peer);
+      for (let i = 0; i < 61; i++) vote(a.peer, id, randomUUID());
+      expect(store.question(SLUG, id)?.votes).toBe(61);
+      expect(a.socket.of("question.rejected")).toHaveLength(1);
+    });
+
+    it("stops at the session cap, counting removed questions", () => {
+      const a = connect();
+      const p = presenter();
+      for (let i = 0; i < 500; i++) {
+        const id = randomUUID();
+        store.addQuestion(SLUG, id, "x", 0, 0, voter);
+        if (i === 0) send(p.peer, { t: "question.remove", m: "1", id });
+      }
+      ask(a.peer);
+      expect(a.socket.of("question.rejected")[0]?.reason).toBe("full");
+    });
+
+    it.each([
+      ["empty text", { text: "   " }],
+      ["text over the limit", { text: "x".repeat(501) }],
+      ["a bad id", { id: "nope" }],
+      ["no slide", { slide: undefined }],
+    ])("disconnects a viewer asking with %s", (_name, change) => {
+      const { socket, peer } = connect();
+      const question = { id: randomUUID(), text: "ok", slide: { h: 0, v: 0 }, ...change };
+      send(peer, { t: "question.ask", m: "1", voter, question });
+      expect(socket.closed).toBe(CLOSE.invalid);
+      expect(store.questions(SLUG)).toEqual([]);
+    });
+
+    it("disconnects a malformed vote", () => {
+      const { socket, peer } = connect();
+      send(peer, { t: "question.vote", m: "1", id: randomUUID(), voter: "x", on: true });
+      expect(socket.closed).toBe(CLOSE.invalid);
+    });
+
+    it("goes when the session goes", () => {
+      const a = connect();
+      const id = ask(a.peer);
+      store.deleteSession(SLUG);
+      expect(store.questionExists(id)).toBe(false);
+    });
+  });
+
+  describe("join code", () => {
+    it("reaches everyone else and late joiners, and is not lost on the presenter's reconnect", () => {
+      const a = connect();
+      const p = presenter();
+      send(p.peer, { t: "join", m: "1", shown: true });
+      expect(a.socket.of("join")[0]?.shown).toBe(true);
+      expect(p.socket.of("join")).toEqual([]);
+      expect(p.socket.of("ack").map((m) => m.m)).toEqual(["1"]);
+      expect(connect().socket.of("snapshot")[0]?.join).toBe(true);
+      rooms.leave(p.peer);
+      expect(presenter().socket.of("snapshot").at(-1)?.join).toBe(true);
+    });
+
+    it("rejects a malformed message", () => {
+      const p = presenter();
+      send(p.peer, { t: "join", m: "1", shown: "yes" });
+      expect(p.socket.closed).toBe(CLOSE.invalid);
     });
   });
 });

@@ -10,10 +10,19 @@ import {
   type PresenterMessage,
   presenterValidators,
   type ServerMessage,
+  type ViewerQuestionMessage,
+  viewerValidators,
 } from "../shared/protocol.ts";
 import type { Store } from "./store.ts";
 
 const TOKEN_TTL_MS = 60_000;
+
+// Per connection. A university shares one IP, so these can't be per address.
+const LIMIT_WINDOW_MS = 60_000;
+const ASKS_PER_WINDOW = 5;
+const VOTES_PER_WINDOW = 60;
+/** Stops a script that keeps reconnecting from filling the database. */
+const MAX_QUESTIONS_PER_SESSION = 500;
 
 type Outgoing = ServerMessage extends infer M ? (M extends unknown ? Omit<M, "v"> : never) : never;
 
@@ -30,6 +39,8 @@ export class Peer {
   received = 0;
   alive = true;
   readonly strokes = new Set<string>();
+  readonly recentAsks: number[] = [];
+  readonly recentVotes: number[] = [];
 
   constructor(
     readonly socket: Socket,
@@ -45,7 +56,17 @@ export class Peer {
   }
 }
 
+/** Records a hit and says whether it fits in the window. Refused hits don't count. */
+function withinLimit(recent: number[], now: number, limit: number): boolean {
+  while (recent.length > 0 && recent[0]! <= now - LIMIT_WINDOW_MS) recent.shift();
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  return true;
+}
+
 class Room {
+  /** Whether the join code is up, full screen. Ends with the room. */
+  join = false;
   readonly peers = new Set<Peer>();
   readonly live = new Map<string, LiveStroke & { owner: Peer }>();
 
@@ -73,6 +94,8 @@ class Room {
 
 type Handler<M> = (room: Room, peer: Peer, message: M) => void;
 type Mutating<T extends Mutation["t"]> = Handler<Extract<Mutation, { t: T }>>;
+type Ask = Extract<ViewerQuestionMessage, { t: "question.ask" }>;
+type Vote = Extract<ViewerQuestionMessage, { t: "question.vote" }>;
 
 export class Rooms {
   private readonly rooms = new Map<string, Room>();
@@ -89,6 +112,8 @@ export class Rooms {
   private readonly viewerHandlers: Record<string, Handler<Record<string, unknown>>> = {
     ping: (_room, peer) => peer.send({ t: "pong" }),
     auth: (room, peer, message) => this.authenticate(room, peer, message),
+    "question.ask": (room, peer, message) => this.onAsk(room, peer, message as unknown as Ask),
+    "question.vote": (room, peer, message) => this.onVote(room, peer, message as unknown as Vote),
   };
 
   private readonly presenterHandlers: { [T in PresenterMessage["t"]]: Handler<Extract<PresenterMessage, { t: T }>> } & {
@@ -103,6 +128,9 @@ export class Rooms {
     "item.remove": (room, peer, m) => this.onItemRemove(room, peer, m),
     "item.restore": (room, peer, m) => this.onItemRestore(room, peer, m),
     "slide.clear": (room, peer, m) => this.onSlideClear(room, peer, m),
+    "question.answer": (room, peer, m) => this.onAnswer(room, peer, m),
+    "question.remove": (room, peer, m) => this.onQuestionRemove(room, peer, m),
+    join: (room, peer, m) => this.onJoin(room, peer, m),
   };
 
   // Tokens
@@ -152,6 +180,8 @@ export class Rooms {
       live: [...room.live.values()].map(({ owner: _owner, ...stroke }) => stroke),
       viewers: room.counts().viewers,
       session: { title: room.title, state: "active" },
+      questions: this.store.questions(room.slug),
+      join: room.join,
     });
   }
 
@@ -190,7 +220,11 @@ export class Rooms {
 
     if (peer.role === "viewer") {
       const handler = Object.hasOwn(this.viewerHandlers, type) ? this.viewerHandlers[type] : undefined;
-      if (handler) handler(peer.room, peer, message);
+      const validate = Object.hasOwn(viewerValidators, type)
+        ? viewerValidators[type as ViewerQuestionMessage["t"]]
+        : undefined;
+      if (validate && !validate(message)) peer.reject(CLOSE.invalid, "malformed message");
+      else if (handler) handler(peer.room, peer, message);
       else if (PRESENTER_TYPES.has(type)) peer.reject(CLOSE.forbidden, "presenter message from a viewer");
       else peer.reject(CLOSE.invalid, "unknown type");
       return;
@@ -217,6 +251,38 @@ export class Rooms {
     peer.role = "presenter";
     this.sendSnapshot(room, peer);
     room.announce();
+  }
+
+  // Viewer handlers
+
+  private onAsk(room: Room, peer: Peer, { m, question, voter }: Ask): void {
+    // A resend after a dropped ack, which must not spend the sender's allowance.
+    if (this.store.questionExists(question.id)) {
+      peer.send({ t: "ack", m });
+      return;
+    }
+    if (!withinLimit(peer.recentAsks, this.now(), ASKS_PER_WINDOW)) {
+      peer.send({ t: "question.rejected", m, reason: "rate" });
+      return;
+    }
+    if (this.store.questionCount(room.slug) >= MAX_QUESTIONS_PER_SESSION) {
+      peer.send({ t: "question.rejected", m, reason: "full" });
+      return;
+    }
+    const { id, text, slide } = question;
+    const added = this.store.addQuestion(room.slug, id, text.trim(), slide.h, slide.v, voter);
+    room.broadcast({ t: "question.add", question: added });
+    peer.send({ t: "ack", m });
+  }
+
+  private onVote(room: Room, peer: Peer, { m, id, voter, on }: Vote): void {
+    if (!withinLimit(peer.recentVotes, this.now(), VOTES_PER_WINDOW)) {
+      peer.send({ t: "question.rejected", m, reason: "rate" });
+      return;
+    }
+    const question = this.store.setVote(room.slug, id, voter, on);
+    if (question) room.broadcast({ t: "question.update", question });
+    peer.send({ t: "ack", m });
   }
 
   // Presenter handlers
@@ -272,6 +338,23 @@ export class Rooms {
     if (cleared.length) room.broadcast({ t: "slide.clear", slide, ids: cleared }, peer);
     peer.send({ t: "ack", m });
   };
+
+  private onAnswer(room: Room, peer: Peer, { m, id, answered }: { m: string; id: string; answered: boolean }): void {
+    const question = this.store.setAnswered(room.slug, id, answered);
+    if (question) room.broadcast({ t: "question.update", question });
+    peer.send({ t: "ack", m });
+  }
+
+  private onQuestionRemove(room: Room, peer: Peer, { m, id }: { m: string; id: string }): void {
+    if (this.store.removeQuestion(room.slug, id)) room.broadcast({ t: "question.remove", id });
+    peer.send({ t: "ack", m });
+  }
+
+  private onJoin(room: Room, peer: Peer, { m, shown }: { m: string; shown: boolean }): void {
+    room.join = shown;
+    room.broadcast({ t: "join", shown }, peer);
+    peer.send({ t: "ack", m });
+  }
 
   // Lifecycle
 

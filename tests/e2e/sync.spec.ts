@@ -47,7 +47,7 @@ test("browsing freely, then back to live", async ({ browser, server, deckSlug })
   await viewer.goto(`${server.url}/${deckSlug}`);
   await ready(viewer);
 
-  await viewer.locator(".live-pill button").click();
+  await viewer.locator(".live-browse").click();
   await viewer.keyboard.press("ArrowRight");
   await viewer.keyboard.press("ArrowRight");
   await expect.poll(async () => (await position(viewer)).h).toBeGreaterThan(0);
@@ -57,7 +57,7 @@ test("browsing freely, then back to live", async ({ browser, server, deckSlug })
   await viewer.waitForTimeout(200);
   expect(await position(viewer)).not.toEqual(live);
 
-  await viewer.locator(".live-pill button").click();
+  await viewer.locator(".live-browse").click();
   await expect.poll(() => position(viewer)).toEqual(live);
   await presenterCtx.close();
 });

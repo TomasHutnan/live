@@ -63,6 +63,16 @@ export interface LiveStroke extends ItemBase, StrokeStyle {
   points: Point[];
 }
 
+/** An audience question. Everyone in the session sees these. */
+export interface Question {
+  id: string;
+  text: string;
+  /** Where the asker was, which may not be where the presenter is. */
+  slide: Slide;
+  votes: number;
+  answered: boolean;
+}
+
 export type SessionState = "active";
 
 // Server to client.
@@ -75,6 +85,9 @@ export type ServerMessage = { v: number } & (
       live: LiveStroke[];
       viewers: number;
       session: { title: string; state: SessionState };
+      questions: Question[];
+      /** True while the presenter is showing the join code full screen. */
+      join: boolean;
     }
   | { t: "position"; position: Position }
   | { t: "stroke.start"; stroke: Omit<LiveStroke, "points"> }
@@ -83,6 +96,11 @@ export type ServerMessage = { v: number } & (
   | { t: "item.remove"; id: string }
   | { t: "item.restore"; item: Item }
   | { t: "slide.clear"; slide: Slide; ids: string[] }
+  | { t: "question.add"; question: Question }
+  | { t: "question.update"; question: Question }
+  | { t: "question.remove"; id: string }
+  | { t: "question.rejected"; m: string; reason: "rate" | "full" }
+  | { t: "join"; shown: boolean }
   | { t: "presence"; viewers: number; presenters: number }
   | { t: "session.removed" }
   | { t: "ack"; m: string }
@@ -101,9 +119,16 @@ export type PresenterMessage =
   | { t: "position"; m: string; position: Position }
   | { t: "stroke.start"; stroke: Omit<LiveStroke, "points"> }
   | { t: "stroke.points"; id: string; points: Point[] }
+  | { t: "question.answer"; m: string; id: string; answered: boolean }
+  | { t: "question.remove"; m: string; id: string }
+  | { t: "join"; m: string; shown: boolean }
   | Mutation;
 
-export type ViewerMessage = { t: "ping" } | { t: "auth"; token: string };
+export type ViewerQuestionMessage =
+  | { t: "question.ask"; m: string; question: Pick<Question, "id" | "text" | "slide">; voter: string }
+  | { t: "question.vote"; m: string; id: string; voter: string; on: boolean };
+
+export type ViewerMessage = { t: "ping" } | { t: "auth"; token: string } | ViewerQuestionMessage;
 
 export const PRESENTER_TYPES: ReadonlySet<string> = new Set([
   "position",
@@ -114,6 +139,9 @@ export const PRESENTER_TYPES: ReadonlySet<string> = new Set([
   "item.remove",
   "item.restore",
   "slide.clear",
+  "question.answer",
+  "question.remove",
+  "join",
 ]);
 
 // Close codes.
@@ -132,6 +160,7 @@ const MAX_POINTS = 50_000;
 const MAX_TEXT = 4_000;
 const MAX_IDS = 20_000;
 const MAX_COORD = 100_000;
+export const MAX_QUESTION_TEXT = 500;
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const isIndex = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0 && (x as number) < 1_000_000;
@@ -193,4 +222,20 @@ export const presenterValidators: Record<PresenterMessage["t"], (m: Record<strin
   "item.restore": (m) => isMsgId(m.m) && isId(m.id),
   "slide.clear": (m) =>
     isMsgId(m.m) && isSlide(m.slide) && Array.isArray(m.ids) && m.ids.length <= MAX_IDS && m.ids.every(isId),
+  "question.answer": (m) => isMsgId(m.m) && isId(m.id) && typeof m.answered === "boolean",
+  "question.remove": (m) => isMsgId(m.m) && isId(m.id),
+  join: (m) => isMsgId(m.m) && typeof m.shown === "boolean",
+};
+
+const isQuestionText = (x: unknown) => typeof x === "string" && x.trim().length > 0 && x.length <= MAX_QUESTION_TEXT;
+
+export const viewerValidators: Record<ViewerQuestionMessage["t"], (m: Record<string, unknown>) => boolean> = {
+  "question.ask": (m) =>
+    isMsgId(m.m) &&
+    isId(m.voter) &&
+    isObject(m.question) &&
+    isId(m.question.id) &&
+    isQuestionText(m.question.text) &&
+    isSlide(m.question.slide),
+  "question.vote": (m) => isMsgId(m.m) && isId(m.id) && isId(m.voter) && typeof m.on === "boolean",
 };

@@ -50,6 +50,16 @@ test("controls flow: connect, navigate, draw, text, undo, panel, reconnect", asy
 
   await expect(controls.frameLocator(".live-next-frame iframe").locator(".reveal")).toBeAttached();
 
+  await viewer.locator(".live-ask").click();
+  await viewer.locator(".live-sheet textarea").fill("Otázka z prehliadača");
+  await viewer.locator(".live-sheet textarea").press("Enter");
+  await expect(controls.locator(".live-panel .live-question")).toContainText("Otázka z prehliadača");
+  await controls.keyboard.press("q");
+  await expect(viewer.locator(".live-join")).toHaveClass(/live-join-full/);
+  await expect.poll(() => viewer.locator(".live-join img").evaluate((i) => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await controls.keyboard.press("q");
+  await expect(viewer.locator(".live-join")).toBeHidden();
+
   await tool(controls, "Pen");
   await proxy.down();
   await expect(controls.locator("html")).toHaveAttribute("data-live-state", "reconnecting");

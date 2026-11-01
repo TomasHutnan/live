@@ -47,6 +47,9 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
 
   const siteOrigin = (request: FastifyRequest) => config.publicOrigin || `${request.protocol}://${request.host}`;
 
+  const qrSvg = (request: FastifyRequest, slug: string) =>
+    QRCode.toString(`${siteOrigin(request)}/${slug}`, { type: "svg", margin: 1 });
+
   function notFound(reply: FastifyReply) {
     return reply.code(404).type(HTML).send(notFoundPage());
   }
@@ -187,8 +190,7 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
 
   app.get("/api/sessions/:slug/qr.svg", guarded, async (request, reply) =>
     withSession(request, reply, async (session) => {
-      const svg = await QRCode.toString(`${siteOrigin(request)}/${session.slug}`, { type: "svg", margin: 1 });
-      return reply.type("image/svg+xml").header("Cache-Control", "no-store").send(svg);
+      return reply.type("image/svg+xml").header("Cache-Control", "no-store").send(await qrSvg(request, session.slug));
     }),
   );
 
@@ -255,6 +257,14 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
 
   app.get("/:slug", async (request, reply) =>
     withSession(request, reply, (_s, deck) => sendDeck(request, reply, deck, "public, no-cache")),
+  );
+
+  // Public, like the viewer page: a projected viewer tab has no credentials, and
+  // the code only holds the viewer link.
+  app.get("/:slug/qr.svg", async (request, reply) =>
+    withSession(request, reply, async (session) =>
+      reply.type("image/svg+xml").header("Cache-Control", "public, max-age=3600").send(await qrSvg(request, session.slug)),
+    ),
   );
 
   app.setNotFoundHandler((_request, reply) => notFound(reply));

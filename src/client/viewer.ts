@@ -1,6 +1,8 @@
-import type { Position, ServerMessage } from "../shared/protocol.ts";
+import { MAX_QUESTION_TEXT, type Position, type Question, type ServerMessage } from "../shared/protocol.ts";
 import { Connection } from "./connection.ts";
+import { JoinCode } from "./join.ts";
 import { applyInkMessage, Overlay } from "./overlay.ts";
+import { questionRow, Questions, type Rejected } from "./questions.ts";
 import { onNavigation, readPosition, type RevealApi, samePosition } from "./reveal.ts";
 import { addStyles } from "./style.ts";
 
@@ -13,6 +15,16 @@ const STRINGS = {
     back: "Späť na živo",
     offline: "Spojenie je prerušené. Pripájam sa znova…",
     over: "Prezentácia sa skončila.",
+    join: "Pripojte sa a pýtajte sa",
+    questions: "Otázky",
+    placeholder: "Napíšte otázku…",
+    send: "Odoslať",
+    close: "Zavrieť",
+    noQuestions: "Zatiaľ žiadne otázky.",
+    answered: "Zodpovedané",
+    vote: "Podporiť otázku",
+    rate: "Posielate príliš rýchlo. Skúste to o chvíľu.",
+    full: "Ďalšie otázky sa už nedajú pridať.",
   },
   en: {
     live: "Live",
@@ -21,12 +33,24 @@ const STRINGS = {
     back: "Back to live",
     offline: "Connection lost. Reconnecting…",
     over: "This session is over.",
+    join: "Join and ask questions",
+    questions: "Questions",
+    placeholder: "Write a question…",
+    send: "Send",
+    close: "Close",
+    noQuestions: "No questions yet.",
+    answered: "Answered",
+    vote: "Support this question",
+    rate: "You're sending too fast. Try again in a moment.",
+    full: "No more questions can be added.",
   },
 };
 
+export const audienceText = () => (document.documentElement.lang.startsWith("sk") ? STRINGS.sk : STRINGS.en);
+
 export function startViewer(reveal: RevealApi, slug: string): void {
   addStyles();
-  const text = document.documentElement.lang.startsWith("sk") ? STRINGS.sk : STRINGS.en;
+  const text = audienceText();
   const root = document.documentElement;
   root.classList.add("live-viewer");
 
@@ -42,7 +66,16 @@ export function startViewer(reveal: RevealApi, slug: string): void {
   label.className = "live-pill-label";
   const toggle = document.createElement("button");
   toggle.type = "button";
-  pill.append(dot, label, toggle);
+  toggle.className = "live-browse";
+  const askLabel = document.createElement("span");
+  askLabel.textContent = text.questions;
+  const askCount = document.createElement("span");
+  askCount.className = "live-count";
+  const ask = document.createElement("button");
+  ask.type = "button";
+  ask.className = "live-ask";
+  ask.append(askLabel, askCount);
+  pill.append(dot, label, ask, toggle);
 
   const banner = document.createElement("div");
   banner.className = "live-banner";
@@ -54,7 +87,35 @@ export function startViewer(reveal: RevealApi, slug: string): void {
   over.className = "live-over";
   over.textContent = text.over;
   over.hidden = true;
-  document.body.append(pill, banner, over);
+
+  const sheetTitle = document.createElement("h2");
+  sheetTitle.textContent = text.questions;
+  const closeSheet = document.createElement("button");
+  closeSheet.type = "button";
+  closeSheet.textContent = text.close;
+  const sheetHead = document.createElement("header");
+  sheetHead.append(sheetTitle, closeSheet);
+  const list = document.createElement("ul");
+  list.className = "live-question-list";
+  const field = document.createElement("textarea");
+  field.placeholder = text.placeholder;
+  field.setAttribute("aria-label", text.placeholder);
+  field.maxLength = MAX_QUESTION_TEXT;
+  field.rows = 2;
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.textContent = text.send;
+  const form = document.createElement("form");
+  form.append(field, send);
+  const note = document.createElement("p");
+  note.className = "live-sheet-note";
+  note.setAttribute("role", "status");
+  const sheet = document.createElement("aside");
+  sheet.className = "live-sheet";
+  sheet.hidden = true;
+  sheet.append(sheetHead, list, note, form);
+
+  document.body.append(pill, banner, over, sheet);
 
   function follow(): void {
     if (live && following && !samePosition(readPosition(reveal), live)) reveal.slide(live.h, live.v, live.f);
@@ -75,6 +136,67 @@ export function startViewer(reveal: RevealApi, slug: string): void {
     toggle.blur(); // Space and arrows belong to reveal, not to this button.
   });
 
+  function setSheetOpen(open: boolean): void {
+    sheet.hidden = !open;
+    ask.blur();
+    closeSheet.blur();
+    if (!open) field.blur(); // Keys go back to reveal.
+  }
+  ask.addEventListener("click", () => setSheetOpen(!!sheet.hidden));
+  closeSheet.addEventListener("click", () => setSheetOpen(false));
+
+  function voteButton(question: Question): HTMLButtonElement {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = "live-vote";
+    node.textContent = `▲ ${question.votes}`;
+    node.title = text.vote;
+    node.setAttribute("aria-label", `${text.vote}: ${question.votes}`);
+    node.setAttribute("aria-pressed", String(questions.hasVoted(question.id)));
+    node.addEventListener("click", () => {
+      note.textContent = "";
+      questions.vote(question.id);
+    });
+    return node;
+  }
+
+  function showQuestions(): void {
+    askCount.textContent = questions.open ? String(questions.open) : "";
+    const rows = questions.sorted().map((question) => {
+      if (!question.answered) return questionRow(question, voteButton(question));
+      const tag = document.createElement("span");
+      tag.textContent = `${text.answered} · ▲ ${question.votes}`;
+      return questionRow(question, tag);
+    });
+    if (rows.length) {
+      list.replaceChildren(...rows);
+    } else {
+      const empty = document.createElement("li");
+      empty.className = "live-empty";
+      empty.textContent = text.noQuestions;
+      list.replaceChildren(empty);
+    }
+  }
+
+  function submit(): void {
+    const question = field.value.trim();
+    if (!question) return;
+    field.value = "";
+    note.textContent = "";
+    const { h, v } = readPosition(reveal);
+    questions.ask(question, { h, v });
+  }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submit();
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      submit();
+    }
+  });
+
   // Anything that moves a following deck, a link in a slide for example, moves it back.
   onNavigation(reveal, follow);
 
@@ -84,30 +206,46 @@ export function startViewer(reveal: RevealApi, slug: string): void {
         live = message.position;
         overlay.setItems(message.items);
         overlay.setLive(message.live);
+        questions.onSnapshot(message.questions);
+        join.shown = message.join;
         follow();
         break;
       case "position":
         live = message.position;
         follow();
         break;
+      case "join":
+        join.shown = message.shown;
+        break;
       case "session.removed":
         over.hidden = false;
         break;
       default:
-        applyInkMessage(overlay, message);
+        if (!questions.onMessage(message)) applyInkMessage(overlay, message);
     }
   }
 
   reveal.configure({ overview: false, help: false, jumpToSlide: false });
   setFollowing(true);
 
-  new Connection({
+  const connection = new Connection({
     slug,
     onMessage,
     onState: (state) => {
       root.dataset.liveState = state;
       root.classList.toggle("live-offline", state === "reconnecting");
       banner.hidden = state !== "reconnecting";
+      if (state !== "connected") questions.onDisconnect();
     },
-  }).start();
+  });
+  const join = new JoinCode(reveal, slug, text.join);
+  const questions = new Questions(connection, slug);
+  const refused: Record<Rejected, string> = { rate: text.rate, full: text.full };
+  questions.onChange = showQuestions;
+  questions.onRejected = (reason, question) => {
+    note.textContent = refused[reason];
+    if (question && !field.value) field.value = question;
+  };
+  showQuestions();
+  connection.start();
 }

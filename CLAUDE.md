@@ -15,7 +15,9 @@ Keep this section short and true. `/live-start handoff` updates it.
 - Built, pushed to `origin/main`, and running on the VPS from `ghcr.io/tomashutnan/live:latest`.
 - VPS: caddy-docker-proxy and homepage, both label-driven, on the external `web` network. Data in
   `/home/deploy/data/live`, owned by uid 1000.
-- Untested: pen feel on a real tablet, a real iPad or phone, and 40 real browsers on Wi-Fi.
+- Audience questions and the join code are built and tested locally, not yet deployed.
+- Untested: pen feel on a real tablet, a real iPad or phone, 40 real browsers on Wi-Fi, and scanning the
+  join code from the back of a real room.
 
 ## Rules from the owner
 
@@ -25,8 +27,6 @@ Keep this section short and true. `/live-start handoff` updates it.
 - Out of scope unless asked: `.qmd` upload, Quarto or Chromium in the image, PDF export, multiple
   users or roles, recording, cookies or a login page.
 - Don't change the `lean` Quarto extension. The service must work on unmodified decks.
-- Audience questions are planned but unbuilt. Add no placeholder UI, tables or endpoints. The seams are
-  in README's "Adding audience questions".
 
 ## Commands
 
@@ -74,6 +74,8 @@ docker run --rm --network host --ipc=host -v "$PWD":/work -w /work -e LIVE_E2E_W
 | Toolbar, side panel, presenter sync | `src/client/controls.ts` |
 | Follow, browse, Slovak strings | `src/client/viewer.ts` |
 | Next-step frame | `src/client/preview.ts` |
+| Question list, votes, outbox | `src/client/questions.ts` |
+| Join code over the deck | `src/client/join.ts` |
 | Reconnect, heartbeat | `src/client/connection.ts` |
 | Pen feel, batching, reconnect timing | `src/client/tuning.ts` |
 | Styles | `src/client/live.css`, `src/client/dashboard.css` |
@@ -104,7 +106,11 @@ docker run --rm --network host --ipc=host -v "$PWD":/work -w /work -e LIVE_E2E_W
 - `slide.clear` names its ids, so a resend can't erase ink drawn later.
 - `leave()` drops only strokes still in `room.live`: a reconnected presenter may have finished one
   on a new socket before the old socket closes.
-- Render ink text with `textContent`, never `innerHTML`. `viewerHandlers` is the only path from viewers.
+- Render ink and question text with `textContent`, never `innerHTML`. `viewerHandlers` is the only path
+  from viewers, and `viewerValidators` checks their messages first.
+- The join code stays an overlay. A real or injected slide would shift every `h` index, which breaks
+  stored ink, position and the export.
+- Viewer rate limits stay per connection, never per IP, because a university shares one IP.
 - Inject before the last `</body>` only. Export starts from the original deck, not the served copy.
 - Keep `keepSlideView()`: below 435 px reveal switches to scroll view, which breaks phones in portrait
   and the preview frame.

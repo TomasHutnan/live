@@ -1,11 +1,14 @@
-import type { Position, ServerMessage } from "../shared/protocol.ts";
+import type { Position, Question, ServerMessage } from "../shared/protocol.ts";
 import { Connection, type ConnectionState } from "./connection.ts";
 import { Ink, uuid } from "./ink.ts";
+import { JoinCode } from "./join.ts";
 import { Overlay } from "./overlay.ts";
 import { Pen, type PenSettings, type Tool } from "./pen.ts";
 import type { PreviewReply, PreviewRequest } from "./preview.ts";
+import { questionRow, Questions } from "./questions.ts";
 import { onNavigation, readPosition, type RevealApi, samePosition } from "./reveal.ts";
 import { addStyles } from "./style.ts";
+import { audienceText } from "./viewer.ts";
 
 const COLORS = ["#111111", "#d3261e", "#1f5fbf", "#1a8a4a", "#e08a00", "#ffffff"];
 const WIDTHS = [
@@ -26,6 +29,7 @@ const ICONS: Record<string, string> = {
   prev: "M15 5l-7 7 7 7",
   next: "M9 5l7 7-7 7",
   panel: "M4 5h16v14H4zM15 5v14",
+  qr: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2M14 20h6v-2",
 };
 
 function icon(name: string): SVGSVGElement {
@@ -89,6 +93,8 @@ export function startControls(reveal: RevealApi, slug: string): void {
   });
   const ink = new Ink(overlay, connection);
   const pen = new Pen(overlay, ink, connection, settings);
+  const questions = new Questions(connection, slug);
+  const join = new JoinCode(reveal, slug, audienceText().join);
 
   // Toolbar
 
@@ -176,10 +182,34 @@ export function startControls(reveal: RevealApi, slug: string): void {
   button("Previous step", icon("prev"), () => reveal.prev());
   button("Next step", icon("next"), () => reveal.next());
   gap();
-  button("Toggle side panel", icon("panel"), () => {
+  const joinButton = button("Show join code (Q)", icon("qr"), toggleJoin);
+  const panelButton = button("Toggle side panel", icon("panel"), () => {
     root.classList.toggle("live-panel-closed");
+    if (!root.classList.contains("live-panel-closed")) setUnread(0);
     reveal.layout();
   });
+  const unreadBadge = document.createElement("span");
+  unreadBadge.className = "live-badge";
+  unreadBadge.hidden = true;
+  panelButton.append(unreadBadge);
+
+  let unread = 0;
+  function setUnread(value: number): void {
+    unread = value;
+    unreadBadge.textContent = String(value);
+    unreadBadge.hidden = value === 0;
+  }
+
+  function showJoin(shown: boolean): void {
+    join.shown = shown;
+    joinButton.setAttribute("aria-pressed", String(shown));
+  }
+
+  function toggleJoin(): void {
+    const shown = !join.shown;
+    showJoin(shown);
+    questions.send({ t: "join", shown });
+  }
 
   // Side panel. Sections stack in a flex column, so another can join them.
 
@@ -210,10 +240,15 @@ export function startControls(reveal: RevealApi, slug: string): void {
     return node;
   };
 
+  const questionsHeading = heading("Questions");
+  const questionList = document.createElement("ul");
+  questionList.className = "live-question-list";
+
   const panel = div(
     "live-panel",
     div("live-status", div("live-connection", stateDot, stateLabel), timer, viewers),
     div("", heading("Next step"), div("live-next-frame", frame, endNote)),
+    div("live-questions-section", questionsHeading, questionList),
     div("live-notes-section", heading("Notes"), notes),
   );
   document.body.append(bar, panel);
@@ -268,6 +303,56 @@ export function startControls(reveal: RevealApi, slug: string): void {
     }
   }
 
+  // Questions
+
+  function questionAction(label: string, onClick: () => void): HTMLButtonElement {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.textContent = label;
+    node.addEventListener("click", () => {
+      onClick();
+      node.blur();
+    });
+    return node;
+  }
+
+  function presenterRow(question: Question): HTMLLIElement {
+    const { h, v } = question.slide;
+    // The number the deck itself prints, which counts vertical slides too.
+    const number = reveal.getSlides().indexOf(reveal.getSlide(h, v)!) + 1;
+    const votes = document.createElement("span");
+    votes.className = "live-votes";
+    votes.textContent = `▲ ${question.votes}`;
+    const answered = questionAction("Answered", () => {
+      questions.send({ t: "question.answer", id: question.id, answered: !question.answered });
+    });
+    answered.setAttribute("aria-pressed", String(question.answered));
+    return questionRow(
+      question,
+      votes,
+      questionAction(`Slide ${number}`, () => reveal.slide(h, v)),
+      answered,
+      questionAction("Remove", () => questions.send({ t: "question.remove", id: question.id })),
+    );
+  }
+
+  function showQuestions(): void {
+    questionsHeading.textContent = questions.open ? `Questions (${questions.open})` : "Questions";
+    const rows = questions.sorted().map(presenterRow);
+    if (rows.length) {
+      questionList.replaceChildren(...rows);
+    } else {
+      const empty = document.createElement("li");
+      empty.className = "live-empty";
+      empty.textContent = "No questions yet.";
+      questionList.replaceChildren(empty);
+    }
+  }
+  questions.onChange = showQuestions;
+  questions.onAdded = () => {
+    if (root.classList.contains("live-panel-closed")) setUnread(unread + 1);
+  };
+
   // Next-step preview
 
   let previewReady = false;
@@ -319,14 +404,20 @@ export function startControls(reveal: RevealApi, slug: string): void {
     root.dataset.liveState = state;
     root.classList.toggle("live-offline", state !== "connected");
     stateLabel.textContent = STATE_LABEL[state];
-    if (state !== "connected") ink.onDisconnect();
+    if (state !== "connected") {
+      ink.onDisconnect();
+      questions.onDisconnect();
+    }
   }
 
   function onMessage(message: ServerMessage): void {
+    if (questions.onMessage(message)) return;
     switch (message.t) {
       case "snapshot":
         if (message.role !== "presenter") return;
         ink.onSnapshot(message.items, message.live, pen.drawingId);
+        questions.onSnapshot(message.questions);
+        showJoin(message.join);
         // A move the server never confirmed, made during a drop, goes out now.
         // Otherwise the server decides.
         if (unconfirmedMove) connection.send({ t: "position", m: unconfirmedMove, position: readPosition(reveal) });
@@ -338,6 +429,9 @@ export function startControls(reveal: RevealApi, slug: string): void {
         break;
       case "position":
         move(message.position);
+        break;
+      case "join":
+        showJoin(message.shown);
         break;
       case "presence":
         viewers.textContent = `${message.viewers} viewer${message.viewers === 1 ? "" : "s"}`;
@@ -365,11 +459,19 @@ export function startControls(reveal: RevealApi, slug: string): void {
     }
   });
 
+  // Q raises the join code. Reveal has no binding for it either.
+  document.addEventListener("keydown", (event) => {
+    if (event.key.toLowerCase() !== "q" || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (document.activeElement instanceof HTMLTextAreaElement) return;
+    toggleJoin();
+  });
+
   chooseTool("navigate");
   chooseColor(settings.color);
   chooseWidth(WIDTHS[0]!);
   refreshButtons();
   showNotes();
+  showQuestions();
   onNavigation(reveal, onNavigated);
   connection.start();
 }

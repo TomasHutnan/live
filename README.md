@@ -95,7 +95,8 @@ the deck.
 
 1. On the dashboard, pick a deck and create a session. Each seminar group gets its own session,
    with its own ink. The slug is suggested from the filename.
-2. Show the viewer link or QR code. Open **Controls** on your laptop or tablet.
+2. Open **Controls** on your laptop or tablet. The join code shows by itself on the first slide, and `Q`
+   brings it back full screen at any time.
 3. Choose a tool to draw. Keys keep working, and on a tablet use the arrows in the toolbar. The
    first button switches back to navigating, where a click or swipe drives the deck as usual.
    Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z redoes.
@@ -106,7 +107,12 @@ Ink belongs to the slide and step it was drawn on: it hides when you step back p
 and returns when you step forward. A drop in Wi-Fi loses nothing. Ink and moves made offline
 are sent after the reconnect.
 
-Removing a session permanently deletes its ink, so the dashboard asks you to type the slug and
+The audience asks from **Otázky** in the bar at the bottom of the viewer page and supports each
+other's questions. They appear in **Questions** in the side panel, most supported first. **Slide N**
+jumps to where a question was asked, **Answered** moves it down the list for everyone, and **Remove**
+takes it away for everyone. With the panel closed, a badge counts new questions.
+
+Removing a session permanently deletes its ink and questions, so the dashboard asks you to type the slug and
 offers the export first. Decks can be deleted once no session uses them.
 
 ## Security notes
@@ -199,10 +205,27 @@ stroke and sits in the outbox until acknowledged, so losing a preview batch lose
 Close codes: 4400 invalid message, 4401 bad token, 4403 viewer sent a presenter message, 4404 no such
 session, 4410 session removed.
 
-### Adding audience questions
+### Audience questions
 
-Sessions are the unit of live state, so questions belong to a session in a new migration. New
-`question.*` types go in the dispatch tables in `rooms.ts`. `viewerHandlers` is the single path for
-everything a viewer can trigger, so rate limits, length limits and validation belong there. The
-side panel is a flex column, so another section can join it. Render question text with
-`textContent`.
+Questions belong to a session (`migrations/002_questions.sql`), and everyone in the session sees them.
+They carry the slide the asker was on. `viewerHandlers` is the single path for everything a viewer can
+trigger, and `viewerValidators` checks each message before it. Limits are per connection, because a
+university shares one IP: 5 questions and 60 votes a minute, plus 500 questions a session.
+
+Votes are one per voter id, a random id the browser keeps in `localStorage`. That stops people, not a
+determined script, which is enough here. There are no cookies or accounts. The asker's vote counts
+from the start, so a question opens at 1.
+
+`src/client/questions.ts` holds the list and its outbox for both pages. Every message there is
+idempotent, as with ink. Removed questions stay as rows, so a resend can't bring one back. Render
+question text with `textContent`.
+
+### Join code
+
+`src/client/join.ts` draws the code over the deck rather than adding a slide, so indices, stored ink
+and the export are untouched. A card shows by itself on the first slide, and `Q` or the toolbar button
+shows it full screen on any slide, through a presenter-only `join` message. Small screens never show
+it, because anyone on one has already joined. Long titles can run under the card.
+
+`GET /:slug/qr.svg` is public, because a projected viewer tab has no credentials, and it only holds the
+viewer link.

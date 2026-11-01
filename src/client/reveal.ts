@@ -11,6 +11,7 @@ export interface RevealApi {
   getSlidesElement(): HTMLElement;
   getCurrentSlide(): HTMLElement;
   getSlide(h: number, v?: number): HTMLElement | undefined;
+  getSlides(): HTMLElement[];
   getTotalSlides(): number;
   slide(h: number, v: number, f?: number): void;
   next(): void;

@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { Item, ItemData, Position } from "../shared/protocol.ts";
+import type { Item, ItemData, Position, Question } from "../shared/protocol.ts";
 
 export interface Deck {
   id: string;
@@ -45,6 +45,28 @@ interface ItemRow {
   step: number;
   data: string;
 }
+
+interface QuestionRow {
+  id: string;
+  text: string;
+  h: number;
+  v: number;
+  answered_at: number | null;
+  votes: number;
+}
+
+const QUESTION_SELECT = `
+  SELECT q.id, q.text, q.h, q.v, q.answered_at, COUNT(v.voter) AS votes
+  FROM questions q LEFT JOIN question_votes v ON v.question_id = q.id
+  WHERE q.session_slug = ? AND q.removed_at IS NULL`;
+
+const toQuestion = (r: QuestionRow): Question => ({
+  id: r.id,
+  text: r.text,
+  slide: { h: r.h, v: r.v },
+  votes: r.votes,
+  answered: r.answered_at !== null,
+});
 
 const toDeck = (r: DeckRow): Deck => ({
   id: r.id,
@@ -119,7 +141,7 @@ export class Store {
       .run(slug, deckId, title, Date.now());
   }
 
-  /** Removes the session and, by cascade, its ink. */
+  /** Removes the session and, by cascade, its ink and questions. */
   deleteSession(slug: string): void {
     this.db.prepare("DELETE FROM sessions WHERE slug = ?").run(slug);
   }
@@ -180,5 +202,69 @@ export class Store {
     );
     const now = Date.now();
     return this.db.transaction(() => ids.filter((id) => update.run(now, id, slug, h, v).changes > 0))();
+  }
+
+  // Questions
+
+  questions(slug: string): Question[] {
+    const rows = this.db.prepare(`${QUESTION_SELECT} GROUP BY q.id ORDER BY q.rowid`).all(slug) as QuestionRow[];
+    return rows.map(toQuestion);
+  }
+
+  question(slug: string, id: string): Question | undefined {
+    const row = this.db.prepare(`${QUESTION_SELECT} AND q.id = ? GROUP BY q.id`).get(slug, id) as QuestionRow | undefined;
+    return row && toQuestion(row);
+  }
+
+  /** True for any id ever used, removed questions included. */
+  questionExists(id: string): boolean {
+    return this.db.prepare("SELECT 1 FROM questions WHERE id = ?").get(id) !== undefined;
+  }
+
+  /** Counts removed questions too, so removing spam doesn't make room for more of it. */
+  questionCount(slug: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM questions WHERE session_slug = ?").get(slug) as { n: number };
+    return row.n;
+  }
+
+  /** Stores a new question, which starts with the asker's own vote. */
+  addQuestion(slug: string, id: string, text: string, h: number, v: number, voter: string): Question {
+    this.db.transaction(() => {
+      this.db
+        .prepare("INSERT INTO questions (id, session_slug, text, h, v, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, slug, text, h, v, Date.now());
+      this.db.prepare("INSERT INTO question_votes (question_id, voter) VALUES (?, ?)").run(id, voter);
+    })();
+    return this.question(slug, id)!;
+  }
+
+  /** Returns the question when the vote really changed. */
+  setVote(slug: string, id: string, voter: string, on: boolean): Question | undefined {
+    if (!this.question(slug, id)) return undefined;
+    const result = on
+      ? this.db
+          .prepare("INSERT INTO question_votes (question_id, voter) VALUES (?, ?) ON CONFLICT DO NOTHING")
+          .run(id, voter)
+      : this.db.prepare("DELETE FROM question_votes WHERE question_id = ? AND voter = ?").run(id, voter);
+    return result.changes > 0 ? this.question(slug, id) : undefined;
+  }
+
+  /** Returns the question when its state really changed. */
+  setAnswered(slug: string, id: string, answered: boolean): Question | undefined {
+    const result = this.db
+      .prepare(
+        `UPDATE questions SET answered_at = ? WHERE id = ? AND session_slug = ? AND removed_at IS NULL
+         AND (answered_at IS NOT NULL) <> ?`,
+      )
+      .run(answered ? Date.now() : null, id, slug, answered ? 1 : 0);
+    return result.changes > 0 ? this.question(slug, id) : undefined;
+  }
+
+  /** Returns true when the question went from visible to removed. */
+  removeQuestion(slug: string, id: string): boolean {
+    const result = this.db
+      .prepare("UPDATE questions SET removed_at = ? WHERE id = ? AND session_slug = ? AND removed_at IS NULL")
+      .run(Date.now(), id, slug);
+    return result.changes > 0;
   }
 }

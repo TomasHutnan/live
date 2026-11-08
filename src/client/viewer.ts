@@ -26,6 +26,7 @@ const STRINGS = {
     vote: "Podporiť otázku",
     rate: "Posielate príliš rýchlo. Skúste to o chvíľu.",
     full: "Ďalšie otázky sa už nedajú pridať.",
+    fullscreen: "Celá obrazovka",
   },
   en: {
     live: "Live",
@@ -45,6 +46,7 @@ const STRINGS = {
     vote: "Support this question",
     rate: "You're sending too fast. Try again in a moment.",
     full: "No more questions can be added.",
+    fullscreen: "Full screen",
   },
 };
 
@@ -59,13 +61,21 @@ export const questionScreen = (reveal: RevealApi) => {
   });
 };
 
-/**
- * True in the Fullscreen API and in the browser's own F11 mode, which that API
- * can't see. There, the window simply fills the screen.
- */
-function isFullscreen(): boolean {
-  if (document.fullscreenElement) return true;
-  return screen.width - window.innerWidth <= 1 && screen.height - window.innerHeight <= 1;
+/** Four corners, drawn rather than typed: no system font has a dependable glyph for it. */
+function fullscreenIcon(): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M1 5V1h4M11 1h4v4M15 11v4h-4M5 15H1v-4");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  svg.append(path);
+  return svg;
 }
 
 export function startViewer(reveal: RevealApi, slug: string): void {
@@ -95,7 +105,15 @@ export function startViewer(reveal: RevealApi, slug: string): void {
   ask.type = "button";
   ask.className = "live-ask";
   ask.append(askLabel, askCount);
-  pill.append(dot, label, ask, toggle);
+  // iPhone Safari has no Fullscreen API, and nobody projects from a phone.
+  const fullscreen = document.createElement("button");
+  fullscreen.type = "button";
+  fullscreen.className = "live-fullscreen-button";
+  fullscreen.append(fullscreenIcon());
+  fullscreen.title = text.fullscreen;
+  fullscreen.setAttribute("aria-label", text.fullscreen);
+  fullscreen.hidden = !document.fullscreenEnabled;
+  pill.append(dot, label, ask, toggle, fullscreen);
 
   const banner = document.createElement("div");
   banner.className = "live-banner";
@@ -266,10 +284,14 @@ export function startViewer(reveal: RevealApi, slug: string): void {
     wall.shown = shown === "questions";
   }
 
-  // A projected page shows the deck and nothing else. Reconnect and session-over
-  // messages still appear: those need the presenter's attention.
-  const syncFullscreen = () => root.classList.toggle("live-fullscreen", isFullscreen());
-  window.addEventListener("resize", syncFullscreen);
+  // A projected page shows the deck and nothing else, but only once someone asks
+  // for full screen: with the button, or reveal's F key. Esc brings the bar back.
+  // Reconnect and session-over messages still appear: those need the presenter.
+  fullscreen.addEventListener("click", () => {
+    fullscreen.blur();
+    void root.requestFullscreen().catch(() => {});
+  });
+  const syncFullscreen = () => root.classList.toggle("live-fullscreen", !!document.fullscreenElement);
   document.addEventListener("fullscreenchange", syncFullscreen);
   syncFullscreen();
 

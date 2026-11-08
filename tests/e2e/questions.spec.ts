@@ -233,41 +233,29 @@ test("questions go full screen for the room, replace the join code, and follow v
   await expect(late.locator(".live-question-screen")).toBeHidden();
 });
 
-test("a fullscreen viewer page hides its controls, in the Fullscreen API and in F11", async ({ browser, server, deckSlug }) => {
-  const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, screen: { width: 1920, height: 1080 } })).newPage();
+test("the full-screen button hides the viewer's controls until full screen ends", async ({ browser, server, deckSlug }) => {
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, screen: { width: 1280, height: 720 } })).newPage();
   await page.goto(`${server.url}/${deckSlug}`);
   await connected(page);
   const pill = page.locator(".live-pill");
+  // A window that fills the screen is no longer taken as a request for full screen.
   await expect(pill).toBeVisible();
   await page.locator(".live-ask").click();
   await expect(page.locator(".live-sheet")).toBeVisible();
 
-  await page.locator(".live-sheet h2").evaluate((heading) => {
-    heading.addEventListener("click", () => void document.documentElement.requestFullscreen(), { once: true });
-  });
-  await page.locator(".live-sheet h2").click();
+  await page.locator(".live-fullscreen-button").click();
   await expect(pill).toBeHidden();
   await expect(page.locator(".live-sheet")).toBeHidden();
   await page.evaluate(() => document.exitFullscreen());
   await expect(pill).toBeVisible();
-
-  // F11 is invisible to the Fullscreen API: the window just fills the screen.
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  await expect(pill).toBeHidden();
-  // Playwright's emulated screen follows the viewport. A real one stays put.
-  await page.evaluate(() => {
-    Object.defineProperty(screen, "width", { value: 1920 });
-    Object.defineProperty(screen, "height", { value: 1080 });
-  });
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await expect(pill).toBeVisible();
 });
 
-test("a phone keeps its controls even when its window fills the screen", async ({ browser, server, deckSlug }) => {
+test("a phone has no full-screen button and keeps its controls", async ({ browser, server, deckSlug }) => {
   const size = { width: 390, height: 844 };
   const phone = await (await browser.newContext({ viewport: size, screen: size })).newPage();
   await phone.goto(`${server.url}/${deckSlug}`);
   await connected(phone);
-  await expect(phone.locator("html")).toHaveClass(/live-fullscreen/);
   await expect(phone.locator(".live-pill")).toBeVisible();
+  await expect(phone.locator(".live-fullscreen-button")).toBeHidden();
+  await expect(phone.locator("html")).not.toHaveClass(/live-fullscreen/);
 });

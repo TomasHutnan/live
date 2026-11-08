@@ -11,7 +11,7 @@ import { type Config, decksDir } from "./config.ts";
 import { DeckFiles, MAX_UPLOAD_BYTES, UploadError } from "./decks.ts";
 import { annotatedDeck } from "./inject.ts";
 import { allowsUnsafeRequest, originMatches } from "./origin.ts";
-import { dashboardPage, notFoundPage } from "./pages.ts";
+import { dashboardPage, homeLanguage, homePage, notFoundPage } from "./pages.ts";
 import { Rooms } from "./rooms.ts";
 import { type Deck, type Session, Store } from "./store.ts";
 
@@ -90,7 +90,23 @@ export async function buildApp(config: Config, db: Database.Database): Promise<F
     return asset ? sendAsset(request, reply, asset) : notFound(reply);
   });
 
-  app.get("/", async (_request, reply) => reply.redirect("/dashboard"));
+  // Public homepage. Its form sends the session code back here as ?code=, so it
+  // works without JavaScript; a known code goes on to the viewer.
+  app.get("/", async (request, reply) => {
+    const lang = homeLanguage(request.headers["accept-language"]);
+    reply.header("Vary", "Accept-Language");
+    const raw = (request.query as { code?: unknown }).code;
+    if (typeof raw !== "string") {
+      return reply.type(HTML).header("Cache-Control", "no-cache").send(homePage({ lang, aboutUrl: config.aboutUrl }));
+    }
+    const code = raw.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+    if (isValidSlug(code) && store.session(code)) return reply.redirect(`/${code}`);
+    return reply
+      .code(404)
+      .type(HTML)
+      .header("Cache-Control", "no-store")
+      .send(homePage({ lang, aboutUrl: config.aboutUrl, missing: raw.trim().slice(0, 60) }));
+  });
 
   app.get("/dashboard", guarded, async (_request, reply) =>
     reply.type(HTML).header("Cache-Control", "no-store").send(dashboardPage()),

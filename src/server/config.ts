@@ -11,6 +11,8 @@ export interface Config {
   /** Passed to Fastify's trustProxy: only these peers may set X-Forwarded-*. */
   trustProxy: string[];
   heartbeatMs: number;
+  /** Optional link on the homepage to a write-up about the service. Empty hides it. */
+  aboutUrl: string;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -32,6 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // Docker network. Those are the loopback and private ranges.
     trustProxy: (env.LIVE_TRUST_PROXY ?? "loopback,uniquelocal").split(",").map((s) => s.trim()),
     heartbeatMs: Number(env.LIVE_HEARTBEAT_MS ?? 25_000),
+    aboutUrl: env.LIVE_ABOUT_URL ?? "",
   };
 }
 

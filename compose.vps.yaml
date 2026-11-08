@@ -14,6 +14,7 @@ services:
       - LIVE_ADMIN_USER=${LIVE_ADMIN_USER:?set it in .env}
       - LIVE_ADMIN_PASSWORD_HASH=${LIVE_ADMIN_PASSWORD_HASH:?run hash-password and put the line in .env}
       - LIVE_PUBLIC_ORIGIN=https://${LIVE_DOMAIN:?set it in .env}
+      - LIVE_ABOUT_URL=${LIVE_ABOUT_URL:-}
     volumes:
       - ${LIVE_DATA_PATH:?set it in .env}:/data # must be owned by uid 1000
     networks:

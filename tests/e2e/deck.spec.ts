@@ -60,10 +60,37 @@ test("protects the owner's routes and keeps the viewer public", async ({ server,
   expect((await server.request("GET", `/controls/${deckSlug}`)).status).toBe(200);
 });
 
-test("redirects / and returns a plain 404 for unknown slugs", async ({ server }) => {
-  const root = await fetch(server.url, { redirect: "manual" });
-  expect(root.status).toBe(302);
-  expect(root.headers.get("location")).toBe("/dashboard");
+test("serves a public homepage whose code box leads to the viewer", async ({ server, deckSlug, browser }) => {
+  const root = await fetch(server.url, { headers: { "Accept-Language": "sk,en;q=0.8" } });
+  expect(root.status).toBe(200);
+  const body = await root.text();
+  expect(body).toContain('lang="sk"');
+  expect(body).toContain("Kód seminára");
+  expect(body).not.toContain("How it works");
+
+  const page = await (await browser.newContext({ locale: "en-GB" })).newPage();
+  await page.goto(server.url);
+  const code = page.getByLabel("Session code");
+  await code.fill(` ${deckSlug.toUpperCase()} `);
+  await page.getByRole("button", { name: "Join" }).click();
+  await expect(page).toHaveURL(`${server.url}/${deckSlug}`);
+
+  await page.goto(server.url);
+  await page.getByLabel("Session code").fill("<b>nope</b>");
+  await page.getByRole("button", { name: "Join" }).click();
+  await expect(page.getByRole("alert")).toHaveText("There is no session called “<b>nope</b>”. Check the code on the board.");
+  await expect(page.getByLabel("Session code")).toHaveValue("<b>nope</b>");
+  // Reserved words are not sessions, even though their routes exist.
+  expect((await fetch(`${server.url}/?code=dashboard`, { redirect: "manual" })).status).toBe(404);
+});
+
+test("links the homepage to the write-up when one is configured", async ({ ownServer }) => {
+  const server = await ownServer({ LIVE_ABOUT_URL: "https://example.com/live" });
+  const body = await (await fetch(server.url)).text();
+  expect(body).toContain('href="https://example.com/live"');
+});
+
+test("returns a plain 404 for unknown slugs", async ({ server }) => {
   const missing = await fetch(`${server.url}/no-such-session`);
   expect(missing.status).toBe(404);
   expect(await missing.text()).toContain("Not found");

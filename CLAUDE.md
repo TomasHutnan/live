@@ -15,7 +15,7 @@ Keep this section short and true. `/live-start handoff` updates it.
 - Built, pushed to `origin/main`, and running on the VPS from `ghcr.io/tomashutnan/live:latest`.
 - VPS: caddy-docker-proxy and homepage, both label-driven, on the external `web` network. Data in
   `/home/deploy/data/live`, owned by uid 1000.
-- Audience questions and the join code are built and tested locally, not yet deployed.
+- `deck.spec` "rejects an upload over 50 MB" is flaky in the full parallel run (422 instead of 413).
 - Untested: pen feel on a real tablet, a real iPad or phone, 40 real browsers on Wi-Fi, and scanning the
   join code from the back of a real room.
 
@@ -56,6 +56,7 @@ docker run --rm --network host --ipc=host -v "$PWD":/work -w /work -e LIVE_E2E_W
 
 | Need | File |
 | --- | --- |
+| Homepage, dashboard and 404 HTML | `src/server/pages.ts` |
 | HTTP routes, Origin hook, WebSocket route, export route | `src/server/app.ts` |
 | Rooms, tokens, per-role dispatch tables, heartbeat | `src/server/rooms.ts` |
 | SQLite queries | `src/server/store.ts` |
@@ -110,8 +111,8 @@ docker run --rm --network host --ipc=host -v "$PWD":/work -w /work -e LIVE_E2E_W
   from viewers, and `viewerValidators` checks their messages first.
 - The join code stays an overlay. A real or injected slide would shift every `h` index, which breaks
   stored ink, position and the export.
-- Fullscreen detection covers F11, which the Fullscreen API can't see, by comparing the window to the
-  screen. Keep the `min-width` guard on hiding: a phone's window can match its screen, and phones ask.
+- The viewer hides its bar only when `document.fullscreenElement` is set, from the bar's button or
+  reveal's `F`. Don't guess full screen from window size: a phone's window can match its screen.
 - Viewer rate limits stay per connection, never per IP, because a university shares one IP.
 - Inject before the last `</body>` only. Export starts from the original deck, not the served copy.
 - Keep `keepSlideView()`: below 435 px reveal switches to scroll view, which breaks phones in portrait

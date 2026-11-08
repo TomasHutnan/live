@@ -28,6 +28,7 @@ the machine with `LIVE_PUBLIC_ORIGIN` left empty.
 | `LIVE_ADMIN_PASSWORD_HASH` | Argon2id hash from `npm run hash-password`, in single quotes. Required. |
 | `LIVE_PUBLIC_ORIGIN` | Exact site origin. Empty means "compare with the Host header". |
 | `LIVE_TRUST_PROXY` | Peers allowed to set `X-Forwarded-*`. Default `loopback,uniquelocal`. |
+| `LIVE_ABOUT_URL` | Optional link from the homepage to a write-up about the service. |
 
 If `LIVE_PUBLIC_ORIGIN` doesn't match the address in your browser, the dashboard's forms and
 the WebSocket are refused. That check is deliberate.
@@ -93,6 +94,10 @@ the deck.
 
 ## Presenting
 
+The homepage at `/` is public. It says what Live is and has a box for the session code, so students
+can type `ib111` instead of the whole link. `/dashboard` and `/controls/<slug>` ask for the login, and
+`/<slug>` is the public viewer.
+
 1. On the dashboard, pick a deck and create a session. Each seminar group gets its own session,
    with its own ink. The slug is suggested from the filename.
 2. Open **Controls** on your laptop or tablet. The join code shows by itself on the first slide, and `Q`
@@ -113,8 +118,11 @@ jumps to where a question was asked, **Answered** moves it down the list for eve
 takes it away for everyone. With the panel closed, a badge counts new questions. `W` or the toolbar
 button puts the five most supported open questions on screen for the room, and they update live.
 
-To project, open the viewer link and press `F11`. In fullscreen the page hides **Naživo**, **Otázky**
-and **Prechádzať**, so only the deck shows. Reconnect and session-over messages still appear.
+To project, open the viewer link and press the full-screen button at the end of the bar, or `F`. In
+full screen the page hides **Naživo**, **Otázky** and **Prechádzať**, so only the deck shows, and `Esc`
+brings them back. Reconnect and session-over messages still appear. `F11` alone keeps the bar, because
+the page can't tell it from a large window. Phones get no button: iPhone Safari can't make a page full
+screen, and nobody projects from a phone.
 
 Removing a session permanently deletes its ink and questions, so the dashboard asks you to type the slug and
 offers the export first. Decks can be deleted once no session uses them.
@@ -229,8 +237,8 @@ question text with `textContent`.
 `src/client/join.ts` draws the code over the deck rather than adding a slide, so indices, stored ink
 and the export are untouched. A card shows by itself on the first slide, and `Q` or the toolbar button
 shows it full screen on any slide, through a presenter-only `screen` message. That message also carries
-the full-screen questions, so only one of the two is up at a time. Small screens never show either, and
-phones keep their own controls even in fullscreen. Long titles can run under the card.
+the full-screen questions, so only one of the two is up at a time. Small screens never show either.
+Long titles can run under the card.
 
 `GET /:slug/qr.svg` is public, because a projected viewer tab has no credentials, and it only holds the
 viewer link.
